@@ -320,7 +320,3 @@ def generate_final_response(prompt, db_data):
             return None
 
     return " ".join(final_response)
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
