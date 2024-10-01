@@ -7,6 +7,11 @@ import re
 from decimal import Decimal
 from datetime import datetime, date
 import logging
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
 
 app = Flask(__name__)
 response_history = {}
@@ -14,25 +19,14 @@ response_history = {}
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Load configuration from config.json file
-try:
-    with open('config.json') as config_file:
-        config = json.load(config_file)
-except (FileNotFoundError, json.JSONDecodeError) as e:
-    logging.error("Error loading config file: %s", e)
-    raise
+# OpenAI and DB credentials
+openai.api_key = os.getenv('OPENAI_API_KEY')
 
-openai.api_key = config.get('openai_api_key')
-if not openai.api_key:
-    logging.error('OpenAI API key is missing in the config file')
-    raise ValueError('OpenAI API key is missing in the config file')
-
-# Database connection parameters from config file
-DB_HOST = config['database']['host']
-DB_PORT = config['database']['port']
-DB_NAME = config['database']['dbname']
-DB_USER = config['database']['user']
-DB_PASSWORD = config['database']['password']
+DB_HOST = os.getenv('DB_HOST')
+DB_PORT = os.getenv('DB_PORT')
+DB_NAME = os.getenv('DB_NAME')
+DB_USER = os.getenv('DB_USER')
+DB_PASSWORD = os.getenv('DB_PASSWORD')
 
 
 def get_database_schema():
@@ -102,23 +96,18 @@ def generate_response():
 
     formatted_schema = format_schema_for_gpt(schema)
 
-    # Determine if new data is needed based on the current prompt
     if requires_more_data(prompt):
         sql_query = generate_sql_query(prompt, formatted_schema)
         if not sql_query:
             return jsonify({'error': 'Failed to generate SQL query'}), 500
 
-        # Log the generated SQL query
         logging.info("Generated SQL query: %s", sql_query)
-
         new_data = execute_sql_query(sql_query)
         if new_data is None:
-            new_data = []  # Proceed with empty data if SQL execution failed
+            new_data = []
 
-        # Store the new data in response_history
         response_history['previous_response'] = new_data
     else:
-        # Use previously retrieved data
         new_data = response_history.get('previous_response', [])
 
     final_response = generate_final_response(prompt, new_data)
@@ -130,29 +119,18 @@ def generate_response():
 
 @app.route("/reset", methods=["POST"])
 def reset():
-    """Reset the response history and redirect to the home page."""
     global response_history
-    response_history.clear()  # Clear the response history
+    response_history.clear()
     return jsonify({"message": "Response history cleared."}), 200
 
 
 def requires_more_data(prompt):
-    """Determine if the prompt requires more data from the database."""
     if not response_history.get('previous_response'):
-        return True  # If no previous data, we need new data
+        return True
 
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an assistant that determines if the user's query can be answered "
-                "with the provided data. Respond 'yes' if more data is needed, otherwise respond 'no'."
-            )
-        },
-        {
-            "role": "user",
-            "content": f"Prompt: {prompt}\nExisting Data: {json.dumps(response_history.get('previous_response', []), default=convert_to_serializable)}"
-        }
+        {"role": "system", "content": "Does the user's query need more data? Respond 'yes' or 'no'."},
+        {"role": "user", "content": f"Prompt: {prompt}\nData: {json.dumps(response_history.get('previous_response', []), default=convert_to_serializable)}"}
     ]
 
     try:
@@ -163,15 +141,13 @@ def requires_more_data(prompt):
             temperature=0.0,
             n=1,
         )
-
         return response.choices[0].message['content'].strip().lower() == 'yes'
     except Exception as e:
         logging.error("Error determining if more data is needed: %s", e)
-        return True  # Default to needing more data if GPT fails
+        return True
 
 
 def ensure_semicolon(sql_query):
-    """Ensure the SQL query starts with SELECT and ends with a semicolon."""
     pattern = r"\bSELECT\b.*?(?=;|$)"
     match = re.search(pattern, sql_query, re.IGNORECASE | re.DOTALL)
     if match:
@@ -181,16 +157,9 @@ def ensure_semicolon(sql_query):
 
 
 def generate_sql_query(prompt, schema):
-    """Generate SQL query based on user prompt and schema."""
     messages = [
-        {
-            "role": "system",
-            "content": (
-                    "You are an assistant that converts user prompts into safe, "
-                    "read-only SQL queries. Here is the database schema:\n\n" + schema
-            )
-        },
-        {"role": "user", "content": f"Generate an SQL query for the following prompt: {prompt}"}
+        {"role": "system", "content": f"Convert this to an SQL query: {schema}"},
+        {"role": "user", "content": prompt}
     ]
 
     try:
@@ -201,7 +170,6 @@ def generate_sql_query(prompt, schema):
             temperature=0,
             n=1,
         )
-
         sql_query = response.choices[0].message['content'].strip()
         return ensure_semicolon(sql_query)
 
@@ -210,21 +178,10 @@ def generate_sql_query(prompt, schema):
         return None
 
 
-def is_safe_sql(sql_query):
-    """Check if the SQL query is safe and read-only."""
-    try:
-        parsed = sqlparse.parse(sql_query)
-        return all(statement.get_type() == 'SELECT' for statement in parsed)
-    except Exception as e:
-        logging.error("Error parsing SQL query: %s", e)
-        return False
-
-
 def execute_sql_query(sql_query):
-    """Execute the SQL query and return the result."""
     if not is_safe_sql(sql_query):
-        logging.warning("Unsafe SQL query detected, not executing: %s", sql_query)
-        return []  # Return an empty list to proceed with GPT response
+        logging.warning("Unsafe SQL query: %s", sql_query)
+        return []
 
     try:
         conn = psycopg2.connect(
@@ -236,9 +193,7 @@ def execute_sql_query(sql_query):
         )
         cursor = conn.cursor()
         cursor.execute(sql_query)
-
-        # Fetch limited results to prevent sending too much data
-        results = cursor.fetchmany(500)  # Fetch up to 500 rows
+        results = cursor.fetchmany(500)
         colnames = [desc[0] for desc in cursor.description]
         cursor.close()
         conn.close()
@@ -246,42 +201,30 @@ def execute_sql_query(sql_query):
         return [dict(zip(colnames, row)) for row in results] if results else []
     except Exception as e:
         logging.error("Error executing SQL query: %s", e)
-        return []  # Return an empty list to allow GPT to handle the response
+        return []
 
 
 def convert_to_serializable(obj):
-    """Convert non-serializable objects to serializable ones."""
     if isinstance(obj, list):
         return [convert_to_serializable(item) for item in obj]
     elif isinstance(obj, dict):
         return {key: convert_to_serializable(value) for key, value in obj.items()}
     elif isinstance(obj, Decimal):
-        return float(obj)  # Convert Decimal to float
+        return float(obj)
     elif isinstance(obj, (datetime, date)):
-        return obj.isoformat()  # Convert datetime/date to ISO 8601 string
+        return obj.isoformat()
     else:
         return obj
 
 
-def chunk_data(data, chunk_size=100):
-    """Split data into chunks of specified size."""
-    for i in range(0, len(data), chunk_size):
-        yield data[i:i + chunk_size]
-
-
 def generate_final_response(prompt, db_data):
-    """
-    Generate the final response by passing the prompt and data to GPT.
-    If no data is available from the database or the query is incorrect, GPT will answer directly.
-    """
     final_response = []
-
-    if db_data:  # If database returned data, use it to generate the response
+    if db_data:
         db_data_serializable = convert_to_serializable(db_data)
 
         for chunk in chunk_data(db_data_serializable):
             messages = [
-                {"role": "system", "content": "You are an assistant that helps users analyze data."},
+                {"role": "system", "content": "Analyze the following data."},
                 {"role": "user", "content": f"Prompt: {prompt}\nData: {json.dumps(chunk)}"}
             ]
 
@@ -298,11 +241,10 @@ def generate_final_response(prompt, db_data):
             except Exception as e:
                 logging.error("Error generating GPT response: %s", e)
                 return None
-
-    else:  # If no data is available or query failed, use GPT to generate the response
+    else:
         messages = [
-            {"role": "system", "content": "You are an assistant that helps users answer queries."},
-            {"role": "user", "content": f"Prompt: {prompt}\nData: No data was available from the database."}
+            {"role": "system", "content": "Answer the user's query."},
+            {"role": "user", "content": f"Prompt: {prompt}\nNo data available."}
         ]
 
         try:
@@ -316,7 +258,7 @@ def generate_final_response(prompt, db_data):
             final_response.append(response.choices[0].message['content'].strip())
 
         except Exception as e:
-            logging.error("Error generating GPT fallback response: %s", e)
+            logging.error("Error generating fallback response: %s", e)
             return None
 
     return " ".join(final_response)
