@@ -204,6 +204,21 @@ def execute_sql_query(sql_query):
         return []
 
 
+def is_safe_sql(query):
+    """
+    Simple check for SQL injection prevention by looking for dangerous keywords.
+    This is a basic check and not a complete solution to SQL injection.
+    """
+    blacklist = ['DROP', 'DELETE', 'INSERT', 'UPDATE', '--', ';', '/*', '*/', '@@', '@', 'CHAR', 'NCHAR', 'VARCHAR', 'NVARCHAR', 'ALTER', 'BEGIN', 'CAST', 'CREATE', 'CURSOR', 'DECLARE', 'EXEC', 'FETCH', 'KILL', 'OPEN', 'SYSOBJECTS', 'SYS', 'XP_']
+    query_upper = query.upper()
+
+    for keyword in blacklist:
+        if keyword in query_upper:
+            logging.warning("Unsafe SQL detected: %s", keyword)
+            return False
+    return True
+
+
 def convert_to_serializable(obj):
     if isinstance(obj, list):
         return [convert_to_serializable(item) for item in obj]
