@@ -14,237 +14,183 @@
 
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
-            background-image: url('https://images.pexels.com/photos/28510888/pexels-photo-28510888.jpeg?auto=compress&cs=tinysrgb&w=600&lazy=load');
-            background-repeat:no-repeat;
-            background-size:70%;
-            background-position:center;
-            background-color: transparent;
+            background-color: #f7f7f8;
             color: #333;
             line-height: 1.6;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         header {
-            background-color: #8a4991;
+            background-color: #343541;
             color: white;
-            padding: 20px 0;
+            padding: 10px 0;
             text-align: center;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         header h1 {
-            font-size: 2.5rem;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            margin-bottom: 10px; /* Added margin for spacing */
-        }
-
-        nav {
-            margin: 10px 0;
-        }
-
-        nav a {
-            color: white;
-            text-decoration: none;
-            margin: 0 15px;
-            font-size: 1.1rem;
-            transition: color 0.3s ease;
-        }
-
-        nav a:hover {
-            color: #005fa3;
+            font-size: 1.5rem;
+            letter-spacing: 1px;
         }
 
         .container {
-            width: 80%;
-            margin: 80px auto 0; /* Adds top margin to accommodate fixed header */
+            flex-grow: 1;
             padding: 20px;
-            margin-top: 160px;
+            max-width: 900px;
+            margin: 0 auto;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
         }
 
         h2 {
-            font-size: 1.8rem;
-            color: #8a4991;
-            margin-bottom: 10px;
-        }
-
-        p {
-            margin-bottom: 20px;
-            color: #666;
-        }
-
-        textarea {
-            background-color:rgba(255,255,255,0.5);
-            width: 100%;
-            padding: 15px;
-            font-size: 1rem;
-            border-radius: 8px;
-            border: 1px solid #dcdcdc;
-            margin-bottom: 15px;
-            box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.05);
-            transition: all 0.2s ease;
-        }
-
-        textarea:focus {
-            outline: none;
-            border-color:#8a4991;
-            box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.1);
-        }
-
-        button {
-            background-color: #8a4991;
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            font-size: 1.1rem;
-            border-radius: 50px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
-            width: 100%;
-            max-width: 180px;
-        }
-
-        button:hover {
-            color:black;
-            background-color:rgba(255,255,255,0.5);
-            box-shadow: 0 5px 12px rgba(0, 0, 0, 0.2);
-        }
-
-        #sbt {
+            font-size: 1.5rem;
+            color: #343541;
             margin-bottom: 15px;
         }
 
-        #response {
-            margin-top: 30px;
-            white-space: pre-wrap;
-            background-color:rgba(255,255,255,0.5);
-            border: 1px solid #e1e6f0;
+        #chat-container {
+            flex-grow: 1;
+            margin-top: 10px;
+            height: auto;
+            overflow-y: auto;
             padding: 20px;
             border-radius: 10px;
-            color: #444;
-            font-family: 'Courier New', Courier, monospace;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            background-color: #fff;
+            border: 1px solid #e1e1e1;
         }
 
-        #previous-responses {
-            margin-top: 40px;
+        /* Messages */
+        .message {
+            display: block;
+            margin-bottom: 10px;
+            font-size: 1rem;
         }
 
-        .response-item {
-            background-color: #f7f9fc;
-            border: 1px solid #e4e8f3;
-            padding: 15px;
-            margin-bottom: 15px;
-            border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        .user-message {
+            text-align: right;
+            color: #10a37f;
+            font-weight: 500;
         }
 
-        .response-item:nth-child(even) {
-            background-color: #f0f3f9;
+        .bot-response {
+            text-align: left;
+            color: #343541;
         }
 
-        /* Progress bar */
-        #progress-bar-container {
-            margin-top: 20px;
-            background-color: #e0e0e0;
-            border-radius: 20px;
-            overflow: hidden;
-            height: 20px;
-            width: 20%;
+        /* Input field container */
+        .input-container {
+            display: flex;
+            width: 100%;
+            border-top: 1px solid #dcdcdc;
+            background-color: #f7f7f8;
+            padding: 10px 0;
+            position: relative;
         }
 
-        #progress-bar {
-            height: 100%;
-            width: 0;
-            background-color: #8a4991;
-            border-radius: 20px;
-            transition: width 0.4s ease;
+        .input-container textarea {
+            flex-grow: 1;
+            resize: none;
+            padding: 10px;
+            border: 1px solid #dcdcdc;
+            border-radius: 5px;
+            font-size: 1rem;
+            margin-right: 10px;
         }
 
-        /* Media Queries for Mobile Responsiveness */
+        .input-container button {
+            background-color: #10a37f;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            margin-left: 10px;
+        }
+
+        .input-container button:hover {
+            background-color: #0e8f6d;
+        }
+
+        .reset-button {
+            background-color: #f44336;
+            margin-left: 5px;
+        }
+
+        .reset-button:hover {
+            background-color: #d32f2f;
+        }
+
         @media (max-width: 768px) {
             header h1 {
-                font-size: 2rem;
+                font-size: 1.3rem;
             }
 
-            h2 {
-                font-size: 1.6rem;
-            }
-
-            button {
-                max-width: 100%;
+            .container {
                 padding: 10px;
+            }
+
+            .input-container textarea {
+                padding: 8px;
+            }
+
+            .input-container button {
+                padding: 8px 12px;
             }
         }
     </style>
     <script>
-        function formatResponse(response) {
-            // Replace **text** with <strong>text</strong> for bold formatting
-            response = response.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-
-            // Replace # text with <h3>text</h3> for headers
-            response = response.replace(/^# (.*)/gm, '<h3>$1</h3>');
-
-            return response;
-        }
-
         function sendPrompt() {
             const prompt = document.getElementById('prompt').value;
             if (!prompt) {
                 alert('Please enter a prompt.');
                 return;
             }
-            document.getElementById('response').innerText = 'Processing...';
 
-            // Reset progress bar width
-            const progressBar = document.getElementById('progress-bar');
-            progressBar.style.width = '0';
+            // Display the user message in the chat container
+            const chatContainer = document.getElementById('chat-container');
+            const userMessage = document.createElement('div');
+            userMessage.classList.add('message', 'user-message');
+            userMessage.innerText = prompt;
+            chatContainer.appendChild(userMessage);
 
-            // Show loading bar animation
-            let width = 0;
-            const interval = setInterval(() => {
-                if (width >= 100) {
-                    clearInterval(interval);
-                } else {
-                    width += 10; // Increase progress by 10% for demo purposes
-                    progressBar.style.width = width + '%';
-                }
-            }, 500); // Adjust timing as needed
+            document.getElementById('prompt').value = ''; // Clear input
 
+            // Scroll to the bottom of the chat container
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            // Send the prompt to the Flask backend
             fetch('/generate-response', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ prompt: prompt }),
+                body: JSON.stringify({ prompt }),
             })
             .then(response => response.json())
             .then(data => {
-                if (data.response) {
-                    // Format and display the response using the updated formatResponse function
-                    document.getElementById('response').innerHTML = formatResponse(data.response);
+                const botResponse = document.createElement('div');
+                botResponse.classList.add('message', 'bot-response');
+                botResponse.innerText = data.response; // Display the response from Flask
+                chatContainer.appendChild(botResponse);
 
-                    // Add the new response to the previous responses section
-                    const previousResponsesDiv = document.getElementById('previous-responses');
-                    const responseItem = document.createElement('div');
-                    responseItem.className = 'response-item';
-                    responseItem.innerHTML = formatResponse(data.response);
-                    previousResponsesDiv.appendChild(responseItem);
-                } else if (data.error) {
-                    document.getElementById('response').innerText = 'Error: ' + data.error;
-                }
+                // Scroll to the bottom of the chat container
+                chatContainer.scrollTop = chatContainer.scrollHeight;
             })
-            .catch((error) => {
-                clearInterval(interval); // Stop the progress bar animation
+            .catch(error => {
                 console.error('Error:', error);
-                document.getElementById('response').innerText = 'Error: ' + error;
             });
         }
 
         function resetResponses(event) {
-            event.preventDefault(); // Prevent the form from reloading the page
+            event.preventDefault();
+            document.getElementById('chat-container').innerHTML = ''; // Clear chat
 
-            // Call the reset endpoint to clear response history
+            // Reset the response history in the Flask backend
             fetch('/reset', {
                 method: 'POST',
                 headers: {
@@ -253,44 +199,28 @@
             })
             .then(response => response.json())
             .then(data => {
-                // Clear previous responses and response area
-                document.getElementById('previous-responses').innerHTML = '';
-                document.getElementById('response').innerText = '';
-
-                // Optionally display a message about the reset
-                //confirm(data.message || "Responses reset successfully");
+                console.log(data.message);
             })
-            .catch((error) => {
-                console.error('Error resetting responses:', error);
-                alert('Failed to reset responses: ' + error);
+            .catch(error => {
+                console.error('Error:', error);
             });
         }
     </script>
 </head>
 <body>
     <header>
-        <h1>Chat with GPT and Database</h1>
-        <nav>
-            <a href="/">Home</a> |
-            <a href="/about">About</a> |
-            <a href="/contact">Contact</a>
-        </nav>
+        <h1>ChatGPT-like Interface</h1>
     </header>
     <div class="container">
         <h2>Ask a Question</h2>
-        <p>Enter your prompt below to interact with the chatbot:</p>
-        <textarea id="prompt" rows="5" placeholder="Type your prompt here..."></textarea>
-        <button id="sbt" onclick="sendPrompt()">Send</button>
-        <button onclick="resetResponses(event)">Reset Responses</button>
+        <div id="chat-container"></div>
 
-        <!-- Progress Bar -->
-        <div id="progress-bar-container">
-            <div id="progress-bar"></div>
+        <!-- Input field and button container fixed at the bottom -->
+        <div class="input-container">
+            <textarea id="prompt" rows="1" placeholder="Type your prompt here..."></textarea>
+            <button id="sbt" onclick="sendPrompt()">Send</button>
+            <button class="reset-button" onclick="resetResponses(event)">Reset Chat</button>
         </div>
-
-        <div id="response"></div>
-
-        <div id="previous-responses"></div>
     </div>
 </body>
 </html>
