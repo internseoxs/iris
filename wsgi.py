@@ -1,4 +1,5 @@
-from app import app  # Assuming 'app.py' is the main file where the Flask instance is created
+from app import app  # Import the Flask instance from app.py
 
 if __name__ == "__main__":
-    app.run()
+    # Ensure the app runs in production mode
+    app.run(host="0.0.0.0", port=8000)  # Optional: Adjust the host and port if needed
