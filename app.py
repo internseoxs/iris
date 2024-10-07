@@ -9,7 +9,7 @@ from datetime import datetime, date
 import logging
 import os  # Import os to access environment variables
 
-app = Flask(_name_)
+app = Flask(__name__)
 
 # Initialize conversation history
 conversation_history = []
@@ -399,5 +399,5 @@ def generate_final_response(prompt, db_data, use_previous_response=True):
             return None
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(debug=True)
