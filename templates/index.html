@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Existing meta tags and title -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chat with GPT and Database</title>
+    <!-- Include CSS content here -->
     <style>
-        /* Universal reset for better cross-browser consistency */
+        /* Base Styles */
         * {
             margin: 0;
             padding: 0;
@@ -14,17 +16,34 @@
 
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
-            background-color: #f7f7f8;
-            color: #333;
             line-height: 1.6;
             height: 100vh;
             display: flex;
             flex-direction: column;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .loading-message {
+    font-style: italic;
+    color: gray;
+    text-align: center;
+    margin: 10px 0;
+}
+        /* Day Mode */
+        body.day-mode {
+            background-color: #f7f7f8;
+            color: #333;
+        }
+
+        /* Night Mode */
+        body.night-mode {
+            background-color: #2e2e2e;
+            color: #ffffff;
         }
 
         header {
-            background-color: #343541;
-            color: white;
+            background-color:#d3d3d3;
+            color:#000000;
             padding: 10px 0;
             text-align: center;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -35,14 +54,56 @@
             letter-spacing: 1px;
         }
 
+        .main-container {
+            display: flex;
+            flex-grow: 1;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .chat-history {
+            width: 250px;
+            background-color:0.3s, color 0.3s;
+            color: #000000;
+            padding: 20px;
+            overflow-y: auto;
+            position: absolute;
+            left: 0;
+            top: 61px;
+            bottom: 0;
+        }
+
+        .chat-history h3 {
+            font-size: 1.4rem;
+            margin-bottom: 10px;
+        }
+
+        .chat-item {
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #d3d3d3;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.2s ease;
+            animation: fadeIn 0.3s;
+        }
+
+        .chat-item:hover {
+            background-color: #565a6b;
+        }
+
+        .chat-item.active {
+            background-color: #10a37f;
+        }
+
         .container {
             flex-grow: 1;
             padding: 20px;
-            max-width: 900px;
-            margin: 0 auto;
-            width: 100%;
             display: flex;
             flex-direction: column;
+            width: calc(100% - 250px);
+            margin-left: 250px;
         }
 
         h2 {
@@ -60,13 +121,17 @@
             border-radius: 10px;
             background-color: #fff;
             border: 1px solid #e1e1e1;
+            position: relative;
+
         }
 
-        /* Messages */
         .message {
             display: block;
             margin-bottom: 10px;
             font-size: 1rem;
+            opacity: 0;
+            animation: slideIn 0.5s forwards;
+            position: relative;
         }
 
         .user-message {
@@ -78,9 +143,27 @@
         .bot-response {
             text-align: left;
             color: #343541;
+            margin-top: 10px;
+            font-weight: bold;
         }
 
-        /* Input field container */
+        .message-wrapper {
+            position: relative; /* Allows positioning of child elements */
+            display: flex; /* Use flexbox to align items */
+            align-items: center; /* Vertically center the button and message */
+        }
+
+        .edit-button {
+            margin-right: 10px; /* Add some space between the button and message */
+            background: transparent;
+            border: none;
+            color: #007bff;
+            cursor: pointer;
+            /* Optional: Adjust the size of the button for better visibility */
+            font-size: 16px; /* Change size as needed */
+        }
+
+
         .input-container {
             display: flex;
             width: 100%;
@@ -93,36 +176,101 @@
         .input-container textarea {
             flex-grow: 1;
             resize: none;
-            padding: 10px;
+            padding: 12px;
             border: 1px solid #dcdcdc;
-            border-radius: 5px;
+            border-radius: 10px;
             font-size: 1rem;
             margin-right: 10px;
+            height: 75%;
         }
 
         .input-container button {
             background-color: #10a37f;
             color: white;
             border: none;
-            padding: 10px 20px;
+            padding: 1px 20px;
             font-size: 1rem;
-            border-radius: 5px;
+            border-radius: 10px;
             cursor: pointer;
             transition: background-color 0.2s ease;
-            margin-left: 10px;
+            margin-left: 5px;
+            height: 75%;
         }
 
         .input-container button:hover {
             background-color: #0e8f6d;
         }
 
-        .reset-button {
+        .new-chat-button {
             background-color: #f44336;
+            padding: 1px 20px;
+            font-size: 1rem;
+            color: white;
+            border-radius: 5px;
             margin-left: 5px;
+
         }
 
-        .reset-button:hover {
+        .new-chat-button:hover {
             background-color: #d32f2f;
+        }
+
+        /* Toggle switch styles */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+        }
+
+        .toggle-label {
+            margin-left: 10px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .toggle-switch {
+            width: 60px;
+            height: 30px;
+            background-color: #ccc;
+            border-radius: 15px;
+            position: relative;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .toggle-switch.active {
+            background-color: #10a37f;
+        }
+
+        .toggle-knob {
+            width: 26px;
+            height: 26px;
+            background-color: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: left 0.3s;
+        }
+
+        .toggle-switch.active .toggle-knob {
+            left: 32px;
+        }
+
+        /* Loading spinner styles */
+        .loading-spinner {
+            position: absolute;
+            top: 50%;
+            left: 57%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            border: 4px solid #10a37f;
+            border-top: 4px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            display: none;
+            z-index: 10;
         }
 
         @media (max-width: 768px) {
@@ -139,87 +287,350 @@
             }
 
             .input-container button {
-                padding: 8px 12px;
+                padding: 3px 12px;
+            }
+
+            .chat-history {
+                position: static;
+                width: 100%;
+                height: auto;
+                overflow-y: visible;
+            }
+
+            .container {
+                width: 100%;
+                margin-left: 0;
+            }
+
+            #chat-container {
+                padding: 15px;
+            }
+        }
+
+        /* Keyframe animations */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
             }
         }
     </style>
     <script>
-        function sendPrompt() {
-            const prompt = document.getElementById('prompt').value;
-            if (!prompt) {
-                alert('Please enter a prompt.');
-                return;
+    let chatHistory = [];
+    let currentChatIndex = null;
+    let loadingInterval;
+
+    const loadingMessages = [
+        "Generating response...",
+        "Just a moment...",
+        "Thinking...",
+        "Processing your request...",
+        "Hang tight..."
+    ];
+
+    document.addEventListener("DOMContentLoaded", () => {
+        chatHistory = [];
+        currentChatIndex = null;
+    });
+
+    function renderChatList() {
+        const chatListContainer = document.querySelector('.chat-history');
+        chatListContainer.innerHTML = '<h3>Chat History</h3>';
+
+        chatHistory.forEach((chatSession, index) => {
+            const chatItem = document.createElement('div');
+            chatItem.classList.add('chat-item');
+            if (index === currentChatIndex) {
+                chatItem.classList.add('active');
             }
 
-            // Display the user message in the chat container
-            const chatContainer = document.getElementById('chat-container');
-            const userMessage = document.createElement('div');
-            userMessage.classList.add('message', 'user-message');
-            userMessage.innerText = prompt;
-            chatContainer.appendChild(userMessage);
+            const firstUserMessage = chatSession.messages.find(msg => msg.role === 'user');
+            const title = firstUserMessage ? extractFirstWords(firstUserMessage.content, 5) : 'New Chat';
+            chatItem.innerText = title;
 
-            document.getElementById('prompt').value = ''; // Clear input
+            chatItem.onclick = () => {
+                currentChatIndex = index;
+                renderChatList();
+                loadChatHistory(index);
+            };
 
-            // Scroll to the bottom of the chat container
-            chatContainer.scrollTop = chatContainer.scrollHeight;
+            chatListContainer.appendChild(chatItem);
+        });
+    }
 
-            // Send the prompt to the Flask backend
-            fetch('/generate-response', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ prompt }),
-            })
-            .then(response => response.json())
-            .then(data => {
-                const botResponse = document.createElement('div');
-                botResponse.classList.add('message', 'bot-response');
-                botResponse.innerText = data.response; // Display the response from Flask
-                chatContainer.appendChild(botResponse);
+    function renderChatHistory() {
+        const chatContainer = document.getElementById('chat-container');
+        chatContainer.innerHTML = '';
 
-                // Scroll to the bottom of the chat container
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            })
-            .catch(error => {
-                console.error('Error:', error);
-            });
+        const messages = chatHistory[currentChatIndex]?.messages || [];
+        messages.forEach((message) => {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', message.role === 'user' ? 'user-message' : 'bot-response');
+
+            const messageWrapper = document.createElement('div');
+            messageWrapper.classList.add('message-wrapper');
+
+            if (message.role === 'user') {
+                const editButton = document.createElement('button');
+                editButton.innerText = '✏';
+                editButton.classList.add('edit-button');
+                editButton.onclick = () => editPrompt(currentChatIndex, messages.indexOf(message));
+
+                messageWrapper.appendChild(editButton);
+            }
+
+            const messageContent = document.createElement('span');
+            messageContent.innerText = message.content;
+            messageWrapper.appendChild(messageContent);
+
+            messageElement.appendChild(messageWrapper);
+            chatContainer.appendChild(messageElement);
+        });
+
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function editPrompt(chatIndex, messageIndex) {
+        const prompt = chatHistory[chatIndex].messages[messageIndex].content;
+        document.getElementById('prompt').value = prompt;
+        document.getElementById('sendButton').style.display = 'none';
+        document.getElementById('saveEditButton').style.display = 'inline';
+        document.getElementById('cancelEditButton').style.display = 'inline';
+
+        window.currentEditChatIndex = chatIndex;
+        window.currentEditMessageIndex = messageIndex;
+    }
+
+    function showLoadingMessage() {
+        const chatContainer = document.getElementById('chat-container');
+        const loadingMessageElement = document.createElement('div');
+        loadingMessageElement.classList.add('loading-message');
+        loadingMessageElement.innerText = loadingMessages[0];
+        chatContainer.appendChild(loadingMessageElement);
+
+        let messageIndex = 0;
+        loadingInterval = setInterval(() => {
+            messageIndex = (messageIndex + 1) % loadingMessages.length;
+            loadingMessageElement.innerText = loadingMessages[messageIndex];
+        }, 1000);
+    }
+
+    function hideLoadingMessage() {
+        const chatContainer = document.getElementById('chat-container');
+        const loadingMessageElement = chatContainer.querySelector('.loading-message');
+        if (loadingMessageElement) {
+            chatContainer.removeChild(loadingMessageElement);
         }
+        clearInterval(loadingInterval);
+    }
 
-        function resetResponses(event) {
-            event.preventDefault();
-            document.getElementById('chat-container').innerHTML = ''; // Clear chat
+    function saveEditedPrompt() {
+        const newPrompt = document.getElementById('prompt').value.trim();
 
-            // Reset the response history in the Flask backend
-            fetch('/reset', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            })
-            .then(response => response.json())
-            .then(data => {
-                console.log(data.message);
-            })
-            .catch(error => {
-                console.error('Error:', error);
-            });
+        if (!newPrompt) return;
+
+        document.getElementById('prompt').value = '';
+
+        // Show loading messages while processing the edit
+        showLoadingMessage();
+
+        fetch('/edit-prompt', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_index: window.currentEditChatIndex,
+                message_index: window.currentEditMessageIndex,
+                content: newPrompt
+            }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Hide loading messages once the response is received
+            hideLoadingMessage();
+
+            if (!data.error) {
+                let messages = chatHistory[window.currentEditChatIndex].messages;
+                messages[window.currentEditMessageIndex].content = newPrompt;
+
+                // Remove old assistant response
+                if (messages[window.currentEditMessageIndex + 1] && messages[window.currentEditMessageIndex + 1].role === 'assistant') {
+                    messages.splice(window.currentEditMessageIndex + 1, 1);
+                }
+
+                // Append new assistant response
+                messages.push({ role: 'assistant', content: data.response });
+                renderChatHistory();
+                document.getElementById('saveEditButton').style.display = 'none';
+                document.getElementById('cancelEditButton').style.display = 'none';
+                document.getElementById('sendButton').style.display = 'inline';
+            } else {
+                console.error('Failed to update prompt:', data.error);
+            }
+        })
+        .catch(error => {
+            hideLoadingMessage(); // Hide loading if there's an error
+            console.error('Error updating prompt:', error);
+        });
+    }
+
+    function cancelEdit() {
+        document.getElementById('prompt').value = '';
+        document.getElementById('saveEditButton').style.display = 'none';
+        document.getElementById('cancelEditButton').style.display = 'none';
+        document.getElementById('sendButton').style.display = 'inline';
+    }
+
+    function extractFirstWords(text, wordCount) {
+        let words = text.trim().split(/\s+/);
+        return words.slice(0, wordCount).join(' ') + '...';
+    }
+
+    function loadChatHistory(index) {
+        if (index < 0 || index >= chatHistory.length) return;
+
+        currentChatIndex = index;
+        renderChatList();
+        renderChatHistory();
+    }
+
+    function sendPrompt() {
+        const prompt = document.getElementById('prompt').value.trim();
+
+        if (!prompt) return;
+
+        document.getElementById('prompt').value = '';
+
+        showLoadingMessage();
+
+        fetch('/generate-response', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ prompt }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoadingMessage();
+
+            if (currentChatIndex !== null && currentChatIndex < chatHistory.length) {
+                chatHistory[currentChatIndex].messages.push({ role: 'user', content: prompt });
+                chatHistory[currentChatIndex].messages.push({ role: 'assistant', content: data.response });
+            } else {
+                const newChat = {
+                    messages: [
+                        { role: 'user', content: prompt },
+                        { role: 'assistant', content: data.response }
+                    ]
+                };
+                chatHistory.push(newChat);
+                currentChatIndex = chatHistory.length - 1;
+                renderChatList();
+            }
+
+            renderChatHistory();
+        })
+        .catch(error => {
+            hideLoadingMessage();
+            console.error('Error:', error);
+            alert('An error occurred while processing your request.');
+        });
+    }
+
+    function newChat() {
+        currentChatIndex = chatHistory.length;
+        chatHistory.push({ messages: [] });
+        document.getElementById('chat-container').innerHTML = '';
+        renderChatList();
+        renderChatHistory();
+    }
+
+    function toggleTheme() {
+        const body = document.body;
+        const toggleSwitch = document.querySelector('.toggle-switch');
+
+        if (body.classList.contains('day-mode')) {
+            body.classList.remove('day-mode');
+            body.classList.add('night-mode');
+            toggleSwitch.classList.add('active');
+            localStorage.setItem('theme', 'night');
+        } else {
+            body.classList.remove('night-mode');
+            body.classList.add('day-mode');
+            toggleSwitch.classList.remove('active');
+            localStorage.setItem('theme', 'day');
         }
-    </script>
+    }
+
+    function loadTheme() {
+        const theme = localStorage.getItem('theme') || 'day';
+        if (theme === 'night') {
+            document.body.classList.remove('day-mode');
+            document.body.classList.add('night-mode');
+            document.querySelector('.toggle-switch').classList.add('active');
+        }
+    }
+
+    loadTheme();
+</script>
+
+
+
 </head>
-<body>
+<body class="day-mode">
     <header>
-        <h1>ChatGPT-like Interface</h1>
+        <h1>IRIS - Reporting on Steroids</h1>
     </header>
-    <div class="container">
-        <h2>Ask a Question</h2>
-        <div id="chat-container"></div>
 
-        <!-- Input field and button container fixed at the bottom -->
-        <div class="input-container">
-            <textarea id="prompt" rows="1" placeholder="Type your prompt here..."></textarea>
-            <button id="sbt" onclick="sendPrompt()">Send</button>
-            <button class="reset-button" onclick="resetResponses(event)">Reset Chat</button>
+    <div class="main-container">
+        <div class="chat-history">
+            <h3>Chat History</h3>
+            <!-- Chat history will be dynamically rendered here -->
+        </div>
+
+        <div class="container">
+            <h2>Chat</h2>
+            <div id="chat-container">
+                <!-- Chat messages will be dynamically rendered here -->
+            </div>
+
+            <div class="input-container">
+                <textarea id="prompt" rows="3" placeholder="Type your message..."></textarea>
+                <button onclick="sendPrompt()" id="sendButton">Send</button>
+                <button onclick="saveEditedPrompt()" id="saveEditButton" style="display: none;">Save Edit</button>
+                <button onclick="cancelEdit()" id="cancelEditButton" style="display: none;">Cancel Edit</button>
+                <button class="new-chat-button" onclick="newChat()">New Chat</button>
+            </div>
+            <div class="toggle-container">
+                <div class="toggle-switch" onclick="toggleTheme()">
+                    <div class="toggle-knob"></div>
+                </div>
+                <label>Toggle Dark/Light Theme</label>
+            </div>
         </div>
     </div>
 </body>
