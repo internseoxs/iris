@@ -324,9 +324,13 @@ def generate_sql_query(prompt, schema, messages):
             "content": (
                 "Note that the current year is 2024. Generate the query with ILIKE keyword and use '%' sign before and after "
                 "and do not use '=' whenever we use WHERE clause for datatype CHAR, VARCHAR, and TEXT. Use '=' for the rest of the cases. "
-                "if effective date > ship order  which means delivery status is late otherwise on time."
                 "You are an assistant that converts user prompts into safe, read-only SQL queries. "
-               "don't give me wrong outputs,if you need some more clarity on the prompt given by user , ask some clarifying questions to generate a better response"
+                "  ship_date  is the date on which delievery was expected and  effective_date is the date on which the order is actuallu delievered."
+                "if effective date > ship order  which means delivery status is late otherwise on time"
+        
+                "You also generate clarifying questions when necessary to understand the user's intent better."
+                " there  is column invoice_status in sale_order table  where three unique values are present.no invoice means that its state is cancelled ,invoiced means that state=done and to invoice means that state=draft."
+                "if require, ask some clarifying questions to generate a better response "
                 "Here is the database schema:\n\n" + schema
             )
         }
