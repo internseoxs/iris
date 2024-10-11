@@ -421,7 +421,7 @@ def convert_to_serializable(obj):
         return obj
 
 
-def chunk_data(data, chunk_size=100):
+def chunk_data(data, chunk_size=200):
     """Split data into chunks of specified size."""
     logging.debug("Chunking data into sizes of %d", chunk_size)
     for i in range(0, len(data), chunk_size):
