@@ -7,21 +7,21 @@ import re
 from decimal import Decimal
 from datetime import datetime, date
 import logging
-import os
+import os  # Import os for accessing environment variables
 
 app = Flask(__name__)
 
-# Initialize conversation history as a list of chat sessions
+# Initialize conversation history
 conversation_history = []
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Load OpenAI API key from environment variable
+# Load sensitive configurations from environment variables
 openai.api_key = os.getenv('OPENAI_API_KEY')
 if not openai.api_key:
-    logging.error('OpenAI API key is missing in the environment variables')
-    raise ValueError('OpenAI API key is missing in the environment variables')
+    logging.error('OpenAI API key is missing in environment variables')
+    raise ValueError('OpenAI API key is missing in environment variables')
 
 # Database connection parameters from environment variables
 DB_HOST = os.getenv('DB_HOST')
@@ -31,9 +31,8 @@ DB_USER = os.getenv('DB_USER')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 
 if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
-    logging.error("One or more database credentials are missing in the environment variables")
-    raise ValueError("Database credentials are missing in the environment variables")
-
+    logging.error("Database credentials are missing in environment variables")
+    raise ValueError("Database credentials are missing in environment variables")
 
 def get_database_schema():
     """Retrieve table and column names from the PostgreSQL database."""
@@ -174,17 +173,27 @@ def generate_response_for_edit(chat_index, message_index):
     return jsonify({'response': final_response})
 
 
+
 @app.route("/", methods=["GET"])
 def index():
     logging.info("Rendering index page")
     return render_template("index.html")
-
 
 @app.route("/chat-history", methods=["GET"])
 def chat_history():
     """Endpoint to fetch the chat history."""
     logging.info("Fetching chat history")
     return jsonify({'history': conversation_history})
+
+
+@app.route("/submit_query", methods=["POST"])
+def submit_query():
+    prompt = request.form.get('prompt')
+    if not prompt:
+        logging.warning("No prompt provided in submit_query")
+        return render_template("contact.html", query=None, results=None, error="No prompt provided.")
+    logging.info("Received prompt in submit_query: %s", prompt)
+    return render_template("about.html", prompt=prompt)
 
 
 @app.route('/generate-response', methods=['POST'])
@@ -204,11 +213,12 @@ def generate_response():
 
     formatted_schema = format_schema_for_gpt(schema)
 
-    # Create a new chat session if none exists
+    # Check if a reset is requested or no conversation history exists
     if not conversation_history or 'reset' in data:
+        conversation_history.clear()  # Clear history if reset is requested
         conversation_history.append({'messages': []})
 
-    chat_session = conversation_history[-1]
+    chat_session = conversation_history[-1]  # Access the most recent chat session
     messages = chat_session['messages']
 
     # Append the user's prompt to conversation history
@@ -257,27 +267,33 @@ def generate_response():
 
 @app.route("/reset", methods=["POST"])
 def reset():
-    """Reset the conversation history."""
+    """Reset the conversation history and redirect to the home page."""
     global conversation_history
     conversation_history.clear()  # Clear the conversation history
     logging.info("Conversation history cleared via reset endpoint")
     return jsonify({"message": "Conversation history cleared."}), 200
 
 
-def requires_more_data(prompt, messages):
+def requires_more_data(prompt, messages=None):
     """Determine if the prompt requires more data from the database."""
     logging.debug("Checking if more data is required for the prompt")
+    
     # If no data has been retrieved yet, we need to fetch data
+    if messages is None:
+        # Fallback to global conversation history if no messages are passed
+        messages = conversation_history[-1]['messages'] if conversation_history else []
+
     data_retrieved = any(message for message in messages if 'Data Retrieved' in message.get('content', ''))
     if not data_retrieved:
         logging.info("No data retrieved yet; need to fetch new data")
         return True  # Need to fetch new data
 
+    # Use the last few messages to provide context
     messages_to_use = [
         {
             "role": "system",
             "content": (
-                "You are an assistant that determines if the user's query requires new data from the database. "
+                "You are a conversational AI model that determines if the user's query requires new data from the database. "
                 "Respond 'yes' if new data is needed, otherwise respond 'no'."
             )
         }
@@ -292,7 +308,7 @@ def requires_more_data(prompt, messages):
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=10,
+            max_tokens=200,
             temperature=0.0,
             n=1,
         )
@@ -315,9 +331,11 @@ def ensure_semicolon(sql_query):
     return sql_query
 
 
-def generate_sql_query(prompt, schema, messages):
+def generate_sql_query(prompt, schema, messages=None, use_previous_response=True):
     """Generate SQL query based on user prompt, schema, and conversation history."""
     logging.debug("Generating SQL query based on the prompt")
+
+    # Create the base system message with instructions and schema
     messages_to_use = [
         {
             "role": "system",
@@ -325,26 +343,31 @@ def generate_sql_query(prompt, schema, messages):
                 "Note that the current year is 2024. Generate the query with ILIKE keyword and use '%' sign before and after "
                 "and do not use '=' whenever we use WHERE clause for datatype CHAR, VARCHAR, and TEXT. Use '=' for the rest of the cases. "
                 "You are an assistant that converts user prompts into safe, read-only SQL queries. "
-                "  Effective date is the date on which the order is actually delivered and  ship date is the date on which the delivery was expected"
-                "if effective date > ship date  which means delivery status is late ,if effective date <=ship date which means delivery status is On Time,If effective date is null which means delivery status is Pending "
-        
-                "You also generate clarifying questions when necessary to understand the user's intent better."
-                " there  is column invoice_status in sale_order table  where three unique values are present.no invoice means that its state is cancelled ,invoiced means that state=done and to invoice means that state=draft."
-                "if require, ask some clarifying questions to generate a better response "
+                "If necessary ask some  clarifying questions when necessary to understand the user's intent better."
+                "Differentiate whether the prompt is fresh or it is reply of clarifying questions"
+                "Effective date is the date on which the order is actually delivered and  ship date is the date on which the delivery was expected "
+                "if effective date > ship date  which means delivery status is late ,if effective date = ship date which means delivery status is On Time,If effective date is null which means delivery status is Pending and if effective date < ship date which means delivery is Early "
                 "Here is the database schema:\n\n" + schema
             )
         }
     ]
 
-    # Include the conversation history
-    messages_to_use += messages[-4:]  # Include the last few messages for context
+    # If no messages are passed, fall back to conversation history
+    if messages is None and use_previous_response and conversation_history:
+        messages = conversation_history[-1]['messages'] if conversation_history else []
+    
+    # Include the last few messages from the conversation history for context
+    if messages:
+        messages_to_use += messages[-4:]
 
+    # Append the user's prompt
     messages_to_use.append({
         "role": "user",
         "content": f"Generate an SQL query for the following prompt: {prompt}"
     })
 
     try:
+        # Call GPT to generate the SQL query
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
@@ -354,6 +377,8 @@ def generate_sql_query(prompt, schema, messages):
         )
         sql_query = response.choices[0].message['content'].strip()
         logging.info("SQL query generated by GPT: %s", sql_query)
+
+        # Ensure the query is properly terminated with a semicolon
         return ensure_semicolon(sql_query)
 
     except Exception as e:
@@ -428,19 +453,25 @@ def chunk_data(data, chunk_size=200):
         yield data[i:i + chunk_size]
 
 
-def generate_final_response(prompt, db_data, messages):
+response_history = {'previous_response': []}
+def generate_final_response(prompt, db_data, is_follow_up=False, use_previous_response=True):
     """
     Generate the final response by passing the prompt and data to GPT.
     If no data is available from the database, GPT will answer directly.
     """
     logging.debug("Generating final response")
-    messages_to_use = [
-        {"role": "system",
-         "content": "You are an assistant that provides informative answers based on user prompts and available data."}
+    messages = [
+        {"role": "system", "content": "You are a conversational AI model named Iris born on 2024/10/01 ,that provides informative answers based on user prompts and available data."}
     ]
 
-    # Add conversation history
-    messages_to_use += messages[-4:]  # Include last few messages for context
+    # Add conversation history if needed
+    if use_previous_response and is_follow_up:
+        previous_response = response_history.get('previous_response', [])
+        messages.append({
+            "role": "assistant",
+            "content": f"Previous Response: {json.dumps(previous_response, default=convert_to_serializable)}"
+        })
+        logging.debug("Included previous response in messages")
 
     if db_data:
         # Process database data and chunk it if necessary due to token limits
@@ -452,7 +483,7 @@ def generate_final_response(prompt, db_data, messages):
         final_response = []
         for idx, chunk in enumerate(data_chunks):
             logging.debug("Processing chunk %d/%d", idx + 1, len(data_chunks))
-            temp_messages = messages_to_use.copy()
+            temp_messages = messages.copy()
             temp_messages.append({
                 "role": "user",
                 "content": f"Prompt: {prompt}\nData: {json.dumps(chunk)}"
@@ -463,7 +494,7 @@ def generate_final_response(prompt, db_data, messages):
                     model="gpt-4o-mini",
                     messages=temp_messages,
                     max_tokens=5000,
-                    temperature=0.7,
+                    temperature=0.7,  # Matching temperature from the second version
                     n=1,
                 )
                 # Clean the response before appending
@@ -480,8 +511,7 @@ def generate_final_response(prompt, db_data, messages):
 
     else:
         # No new data; generate response based on previous context
-        temp_messages = messages_to_use.copy()
-        temp_messages.append({
+        messages.append({
             "role": "user",
             "content": f"Based on the previous data, {prompt}"
         })
@@ -490,7 +520,7 @@ def generate_final_response(prompt, db_data, messages):
         try:
             response = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
-                messages=temp_messages,
+                messages=messages,
                 max_tokens=5000,
                 temperature=0.7,
                 n=1,
@@ -505,6 +535,7 @@ def generate_final_response(prompt, db_data, messages):
         except Exception as e:
             logging.error("Error generating GPT response: %s", e)
             return None
+
 
 
 if __name__ == "__main__":
