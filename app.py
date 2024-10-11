@@ -348,7 +348,7 @@ def generate_sql_query(prompt, schema, messages):
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=1000,
+            max_tokens=5000,
             temperature=0,
             n=1,
         )
@@ -462,7 +462,7 @@ def generate_final_response(prompt, db_data, messages):
                 response = openai.ChatCompletion.create(
                     model="gpt-4o-mini",
                     messages=temp_messages,
-                    max_tokens=1500,
+                    max_tokens=5000,
                     temperature=0.7,
                     n=1,
                 )
@@ -491,7 +491,7 @@ def generate_final_response(prompt, db_data, messages):
             response = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 messages=temp_messages,
-                max_tokens=1500,
+                max_tokens=5000,
                 temperature=0.7,
                 n=1,
             )
