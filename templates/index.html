@@ -23,12 +23,6 @@
             transition: background-color 0.3s, color 0.3s;
         }
 
-        .loading-message {
-    font-style: italic;
-    color: gray;
-    text-align: center;
-    margin: 10px 0;
-}
         /* Day Mode */
         body.day-mode {
             background-color: #f7f7f8;
@@ -176,12 +170,11 @@
         .input-container textarea {
             flex-grow: 1;
             resize: none;
-            padding: 12px;
+            padding: 6px;
             border: 1px solid #dcdcdc;
             border-radius: 10px;
             font-size: 1rem;
             margin-right: 10px;
-            height: 75%;
         }
 
         .input-container button {
@@ -194,7 +187,6 @@
             cursor: pointer;
             transition: background-color 0.2s ease;
             margin-left: 5px;
-            height: 75%;
         }
 
         .input-container button:hover {
@@ -208,7 +200,6 @@
             color: white;
             border-radius: 5px;
             margin-left: 5px;
-
         }
 
         .new-chat-button:hover {
@@ -338,268 +329,242 @@
         }
     </style>
     <script>
-    let chatHistory = [];
-    let currentChatIndex = null;
-    let loadingInterval;
 
-    const loadingMessages = [
-        "Generating response...",
-        "Just a moment...",
-        "Thinking...",
-        "Processing your request...",
-        "Hang tight..."
-    ];
+        let chatHistory = [];
+        let currentChatIndex = null;
 
-    document.addEventListener("DOMContentLoaded", () => {
-        chatHistory = [];
-        currentChatIndex = null;
-    });
-
-    function renderChatList() {
-        const chatListContainer = document.querySelector('.chat-history');
-        chatListContainer.innerHTML = '<h3>Chat History</h3>';
-
-        chatHistory.forEach((chatSession, index) => {
-            const chatItem = document.createElement('div');
-            chatItem.classList.add('chat-item');
-            if (index === currentChatIndex) {
-                chatItem.classList.add('active');
-            }
-
-            const firstUserMessage = chatSession.messages.find(msg => msg.role === 'user');
-            const title = firstUserMessage ? extractFirstWords(firstUserMessage.content, 5) : 'New Chat';
-            chatItem.innerText = title;
-
-            chatItem.onclick = () => {
-                currentChatIndex = index;
-                renderChatList();
-                loadChatHistory(index);
-            };
-
-            chatListContainer.appendChild(chatItem);
-        });
-    }
-
-    function renderChatHistory() {
-        const chatContainer = document.getElementById('chat-container');
-        chatContainer.innerHTML = '';
-
-        const messages = chatHistory[currentChatIndex]?.messages || [];
-        messages.forEach((message) => {
-            const messageElement = document.createElement('div');
-            messageElement.classList.add('message', message.role === 'user' ? 'user-message' : 'bot-response');
-
-            const messageWrapper = document.createElement('div');
-            messageWrapper.classList.add('message-wrapper');
-
-            if (message.role === 'user') {
-                const editButton = document.createElement('button');
-                editButton.innerText = '✏';
-                editButton.classList.add('edit-button');
-                editButton.onclick = () => editPrompt(currentChatIndex, messages.indexOf(message));
-
-                messageWrapper.appendChild(editButton);
-            }
-
-            const messageContent = document.createElement('span');
-            messageContent.innerText = message.content;
-            messageWrapper.appendChild(messageContent);
-
-            messageElement.appendChild(messageWrapper);
-            chatContainer.appendChild(messageElement);
+        document.addEventListener("DOMContentLoaded", () => {
+            // Clear chat history on page load
+            chatHistory = [];
+            currentChatIndex = null;
         });
 
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
+        function renderChatList() {
+            const chatListContainer = document.querySelector('.chat-history');
+            chatListContainer.innerHTML = '<h3>Chat History</h3>';
 
-    function editPrompt(chatIndex, messageIndex) {
-        const prompt = chatHistory[chatIndex].messages[messageIndex].content;
-        document.getElementById('prompt').value = prompt;
-        document.getElementById('sendButton').style.display = 'none';
-        document.getElementById('saveEditButton').style.display = 'inline';
-        document.getElementById('cancelEditButton').style.display = 'inline';
-
-        window.currentEditChatIndex = chatIndex;
-        window.currentEditMessageIndex = messageIndex;
-    }
-
-    function showLoadingMessage() {
-        const chatContainer = document.getElementById('chat-container');
-        const loadingMessageElement = document.createElement('div');
-        loadingMessageElement.classList.add('loading-message');
-        loadingMessageElement.innerText = loadingMessages[0];
-        chatContainer.appendChild(loadingMessageElement);
-
-        let messageIndex = 0;
-        loadingInterval = setInterval(() => {
-            messageIndex = (messageIndex + 1) % loadingMessages.length;
-            loadingMessageElement.innerText = loadingMessages[messageIndex];
-        }, 1000);
-    }
-
-    function hideLoadingMessage() {
-        const chatContainer = document.getElementById('chat-container');
-        const loadingMessageElement = chatContainer.querySelector('.loading-message');
-        if (loadingMessageElement) {
-            chatContainer.removeChild(loadingMessageElement);
-        }
-        clearInterval(loadingInterval);
-    }
-
-    function saveEditedPrompt() {
-        const newPrompt = document.getElementById('prompt').value.trim();
-
-        if (!newPrompt) return;
-
-        document.getElementById('prompt').value = '';
-
-        // Show loading messages while processing the edit
-        showLoadingMessage();
-
-        fetch('/edit-prompt', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                chat_index: window.currentEditChatIndex,
-                message_index: window.currentEditMessageIndex,
-                content: newPrompt
-            }),
-        })
-        .then(response => response.json())
-        .then(data => {
-            // Hide loading messages once the response is received
-            hideLoadingMessage();
-
-            if (!data.error) {
-                let messages = chatHistory[window.currentEditChatIndex].messages;
-                messages[window.currentEditMessageIndex].content = newPrompt;
-
-                // Remove old assistant response
-                if (messages[window.currentEditMessageIndex + 1] && messages[window.currentEditMessageIndex + 1].role === 'assistant') {
-                    messages.splice(window.currentEditMessageIndex + 1, 1);
+            chatHistory.forEach((chatSession, index) => {
+                const chatItem = document.createElement('div');
+                chatItem.classList.add('chat-item');
+                if (index === currentChatIndex) {
+                    chatItem.classList.add('active');
                 }
 
-                // Append new assistant response
-                messages.push({ role: 'assistant', content: data.response });
-                renderChatHistory();
-                document.getElementById('saveEditButton').style.display = 'none';
-                document.getElementById('cancelEditButton').style.display = 'none';
-                document.getElementById('sendButton').style.display = 'inline';
-            } else {
-                console.error('Failed to update prompt:', data.error);
-            }
-        })
-        .catch(error => {
-            hideLoadingMessage(); // Hide loading if there's an error
-            console.error('Error updating prompt:', error);
-        });
-    }
+                const firstUserMessage = chatSession.messages.find(msg => msg.role === 'user');
+                const title = firstUserMessage ? extractFirstWords(firstUserMessage.content, 5) : 'New Chat';
+                chatItem.innerText = title;
 
-    function cancelEdit() {
-        document.getElementById('prompt').value = '';
-        document.getElementById('saveEditButton').style.display = 'none';
-        document.getElementById('cancelEditButton').style.display = 'none';
-        document.getElementById('sendButton').style.display = 'inline';
-    }
-
-    function extractFirstWords(text, wordCount) {
-        let words = text.trim().split(/\s+/);
-        return words.slice(0, wordCount).join(' ') + '...';
-    }
-
-    function loadChatHistory(index) {
-        if (index < 0 || index >= chatHistory.length) return;
-
-        currentChatIndex = index;
-        renderChatList();
-        renderChatHistory();
-    }
-
-    function sendPrompt() {
-        const prompt = document.getElementById('prompt').value.trim();
-
-        if (!prompt) return;
-
-        document.getElementById('prompt').value = '';
-
-        showLoadingMessage();
-
-        fetch('/generate-response', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ prompt }),
-        })
-        .then(response => response.json())
-        .then(data => {
-            hideLoadingMessage();
-
-            if (currentChatIndex !== null && currentChatIndex < chatHistory.length) {
-                chatHistory[currentChatIndex].messages.push({ role: 'user', content: prompt });
-                chatHistory[currentChatIndex].messages.push({ role: 'assistant', content: data.response });
-            } else {
-                const newChat = {
-                    messages: [
-                        { role: 'user', content: prompt },
-                        { role: 'assistant', content: data.response }
-                    ]
+                chatItem.onclick = () => {
+                    currentChatIndex = index;
+                    renderChatList();
+                    loadChatHistory(index);
                 };
-                chatHistory.push(newChat);
-                currentChatIndex = chatHistory.length - 1;
-                renderChatList();
-            }
 
+                chatListContainer.appendChild(chatItem);
+            });
+        }
+
+        function renderChatHistory() {
+            const chatContainer = document.getElementById('chat-container');
+            chatContainer.innerHTML = '';
+
+            const messages = chatHistory[currentChatIndex]?.messages || [];
+            messages.forEach((message, messageIndex) => {
+                const messageElement = document.createElement('div');
+                messageElement.classList.add('message', message.role === 'user' ? 'user-message' : 'bot-response');
+
+                // Create a wrapper for the message and the edit button
+                const messageWrapper = document.createElement('div');
+                messageWrapper.classList.add('message-wrapper');
+
+                if (message.role === 'user') {
+                    const editButton = document.createElement('button');
+                    editButton.innerText = '✏';
+                    editButton.classList.add('edit-button');
+                    editButton.onclick = () => editPrompt(currentChatIndex, messageIndex);
+
+                    // Append the edit button to the wrapper
+                    messageWrapper.appendChild(editButton);
+                }
+
+                // Add the message content to the wrapper
+                const messageContent = document.createElement('span');
+                messageContent.innerText = message.content;
+                messageWrapper.appendChild(messageContent);
+
+                // Append the wrapper to the message element
+                messageElement.appendChild(messageWrapper);
+
+                chatContainer.appendChild(messageElement);
+            });
+
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // ... (rest of your existing JavaScript code remains unchanged)
+
+
+
+        function editPrompt(chatIndex, messageIndex) {
+            const prompt = chatHistory[chatIndex].messages[messageIndex].content;
+            document.getElementById('prompt').value = prompt; // Load message content into the input field
+            document.getElementById('sendButton').style.display = 'none'; // Hide send button
+            document.getElementById('saveEditButton').style.display = 'inline'; // Show save edit button
+            document.getElementById('cancelEditButton').style.display = 'inline';
+
+            // Store the indices for reference during save
+            window.currentEditChatIndex = chatIndex;
+            window.currentEditMessageIndex = messageIndex;
+        }
+
+        function saveEditedPrompt() {
+            const newPrompt = document.getElementById('prompt').value.trim();
+            const spinner = document.getElementById('loading-spinner');
+
+            if (!newPrompt) return;
+
+            // Show loading spinner
+            spinner.style.display = 'block';
+            // Clear input
+            document.getElementById('prompt').value = '';
+
+            // Call the backend to save the updated prompt
+            fetch('/edit-prompt', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    chat_index: window.currentEditChatIndex,
+                    message_index: window.currentEditMessageIndex,
+                    content: newPrompt
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading spinner
+                spinner.style.display = 'none';
+
+                if (!data.error) {
+                    // Update the local chat history and re-render
+                    let messages = chatHistory[window.currentEditChatIndex].messages;
+                    messages[window.currentEditMessageIndex].content = newPrompt;
+                    // Remove old assistant response
+                    if (messages[window.currentEditMessageIndex + 1] && messages[window.currentEditMessageIndex + 1].role === 'assistant') {
+                        messages.splice(window.currentEditMessageIndex + 1, 1);
+                    }
+                    // Append new assistant response
+                    messages.push({ role: 'assistant', content: data.response });
+                    renderChatHistory();
+                    document.getElementById('prompt').value = '';
+                    document.getElementById('saveEditButton').style.display = 'none';
+                    document.getElementById('cancelEditButton').style.display = 'none';
+                    document.getElementById('sendButton').style.display = 'inline'; // Show send button again
+                } else {
+                    console.error('Failed to update prompt:', data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error updating prompt:', error);
+                // Hide loading spinner
+                spinner.style.display = 'none';
+            });
+        }
+
+        function cancelEdit() {
+            document.getElementById('prompt').value = ''; // Clear input
+            document.getElementById('saveEditButton').style.display = 'none';
+            document.getElementById('cancelEditButton').style.display = 'none';
+            document.getElementById('sendButton').style.display = 'inline'; // Show send button again
+        }
+
+        function extractFirstWords(text, wordCount) {
+            // Split the text into words and return the first 'wordCount' words
+            let words = text.trim().split(/\s+/);  // Split by whitespace
+            return words.slice(0, wordCount).join(' ') + '...';  // Join the first 'wordCount' words
+        }
+
+        function loadChatHistory(index) {
+            if (index < 0 || index >= chatHistory.length) return;  // Validate index
+
+            currentChatIndex = index;
+            renderChatList();
             renderChatHistory();
-        })
-        .catch(error => {
-            hideLoadingMessage();
-            console.error('Error:', error);
-            alert('An error occurred while processing your request.');
-        });
-    }
-
-    function newChat() {
-        currentChatIndex = chatHistory.length;
-        chatHistory.push({ messages: [] });
-        document.getElementById('chat-container').innerHTML = '';
-        renderChatList();
-        renderChatHistory();
-    }
-
-    function toggleTheme() {
-        const body = document.body;
-        const toggleSwitch = document.querySelector('.toggle-switch');
-
-        if (body.classList.contains('day-mode')) {
-            body.classList.remove('day-mode');
-            body.classList.add('night-mode');
-            toggleSwitch.classList.add('active');
-            localStorage.setItem('theme', 'night');
-        } else {
-            body.classList.remove('night-mode');
-            body.classList.add('day-mode');
-            toggleSwitch.classList.remove('active');
-            localStorage.setItem('theme', 'day');
         }
-    }
 
-    function loadTheme() {
-        const theme = localStorage.getItem('theme') || 'day';
-        if (theme === 'night') {
-            document.body.classList.remove('day-mode');
-            document.body.classList.add('night-mode');
-            document.querySelector('.toggle-switch').classList.add('active');
+        function sendPrompt() {
+            const prompt = document.getElementById('prompt').value.trim();
+            const spinner = document.getElementById('loading-spinner');
+
+            if (!prompt) return;
+
+            // Show loading spinner
+            spinner.style.display = 'block';
+            document.getElementById('prompt').value = '';
+
+            fetch('/generate-response', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ prompt }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading spinner
+                spinner.style.display = 'none';
+
+                // Add to chat history
+                if (currentChatIndex !== null && currentChatIndex < chatHistory.length) {
+                    chatHistory[currentChatIndex].messages.push({ role: 'user', content: prompt });
+                    chatHistory[currentChatIndex].messages.push({ role: 'assistant', content: data.response });
+                } else {
+                    const newChat = {
+                        messages: [
+                            { role: 'user', content: prompt },
+                            { role: 'assistant', content: data.response }
+                        ]
+                    };
+                    chatHistory.push(newChat);
+                    currentChatIndex = chatHistory.length - 1;
+                    renderChatList(); // Update chat history UI
+                }
+
+                renderChatHistory();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                // Hide loading spinner
+                spinner.style.display = 'none';
+                alert('An error occurred while processing your request.');
+            });
         }
-    }
 
-    loadTheme();
-</script>
+        function newChat() {
+            currentChatIndex = chatHistory.length;
+            chatHistory.push({ messages: [] });
+            document.getElementById('chat-container').innerHTML = '';
+            renderChatList();
+            renderChatHistory();
+        }
 
+        function toggleTheme() {
+            const body = document.body;
+            const toggleSwitch = document.querySelector('.toggle-switch');
 
-
+            if (body.classList.contains('day-mode')) {
+                body.classList.remove('day-mode');
+                body.classList.add('night-mode');
+                toggleSwitch.classList.add('active');
+                localStorage.setItem('theme', 'night'); // Save theme to local storage
+            } else {
+                body.classList.remove('night-mode');
+                body.classList.add('day-mode');
+                toggleSwitch.classList.remove('active');
+                localStorage.setItem('theme', 'day'); // Save theme to local storage
+            }
+        }
+    </script>
 </head>
 <body class="day-mode">
     <header>
@@ -625,13 +590,16 @@
                 <button onclick="cancelEdit()" id="cancelEditButton" style="display: none;">Cancel Edit</button>
                 <button class="new-chat-button" onclick="newChat()">New Chat</button>
             </div>
+
             <div class="toggle-container">
                 <div class="toggle-switch" onclick="toggleTheme()">
                     <div class="toggle-knob"></div>
                 </div>
-                <label>Toggle Dark/Light Theme</label>
+                <label class="toggle-label">Night Mode</label>
             </div>
         </div>
     </div>
+
+    <div id="loading-spinner" class="loading-spinner"></div>
 </body>
 </html>
