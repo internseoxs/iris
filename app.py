@@ -7,7 +7,7 @@ import re
 from decimal import Decimal
 from datetime import datetime, date
 import logging
-import os  # Import os for accessing environment variables
+import os  # To access environment variables
 
 app = Flask(__name__)
 
@@ -17,10 +17,10 @@ conversation_history = []
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Load sensitive configurations from environment variables
+# Load OpenAI API key from environment variable
 openai.api_key = os.getenv('OPENAI_API_KEY')
 if not openai.api_key:
-    logging.error('OpenAI API key is missing in environment variables')
+    logging.error('OpenAI API key is missing in the environment variables')
     raise ValueError('OpenAI API key is missing in environment variables')
 
 # Database connection parameters from environment variables
@@ -29,10 +29,6 @@ DB_PORT = os.getenv('DB_PORT')
 DB_NAME = os.getenv('DB_NAME')
 DB_USER = os.getenv('DB_USER')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
-
-if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
-    logging.error("Database credentials are missing in environment variables")
-    raise ValueError("Database credentials are missing in environment variables")
 
 def get_database_schema():
     """Retrieve table and column names from the PostgreSQL database."""
@@ -162,8 +158,8 @@ def generate_response_for_edit(chat_index, message_index):
         logging.error("Failed to generate final response")
         return jsonify({'error': 'Failed to generate final response'}), 500
 
-    # Append the assistant's response to conversation history as a new entry
-    messages.append({
+    # Insert the assistant's response directly after the edited prompt
+    messages.insert(message_index + 1, {
         "role": "assistant",
         "content": final_response
     })
@@ -173,14 +169,24 @@ def generate_response_for_edit(chat_index, message_index):
     return jsonify({'response': final_response})
 
 
+def is_incomplete_prompt(prompt):
+    # Example rule-based logic (you can customize this)
+    if len(prompt.split()) < 5:  # If the prompt is less than 5 words
+        return True
+    if '?' not in prompt and len(prompt.split()) < 10:  # If the prompt has no questions and is too short
+        return True
+    # Add other checks as needed
+    return False
+
 
 @app.route("/", methods=["GET"])
 def index():
     logging.info("Rendering index page")
-    return render_template("index.html")
+    return render_template("final_index.html")
+
 
 @app.route("/chat-history", methods=["GET"])
-def chat_history():
+def chat_history_route():
     """Endpoint to fetch the chat history."""
     logging.info("Fetching chat history")
     return jsonify({'history': conversation_history})
@@ -277,27 +283,27 @@ def reset():
 def requires_more_data(prompt, messages=None):
     """Determine if the prompt requires more data from the database."""
     logging.debug("Checking if more data is required for the prompt")
-    
+
     # If no data has been retrieved yet, we need to fetch data
     if messages is None:
         # Fallback to global conversation history if no messages are passed
         messages = conversation_history[-1]['messages'] if conversation_history else []
 
-    data_retrieved = any(message for message in messages if 'Data Retrieved' in message.get('content', ''))
+    data_retrieved = any('Data Retrieved' in message.get('content', '') for message in messages)
     if not data_retrieved:
         logging.info("No data retrieved yet; need to fetch new data")
         return True  # Need to fetch new data
 
     # Use the last few messages to provide context
     messages_to_use = [
-        {
-            "role": "system",
-            "content": (
-                "You are a conversational AI model that determines if the user's query requires new data from the database. "
-                "Respond 'yes' if new data is needed, otherwise respond 'no'."
-            )
-        }
-    ] + messages[-4:]  # Include the last few messages to provide context
+                          {
+                              "role": "system",
+                              "content": (
+                                  "You are a conversational AI model that determines if the user's query requires new data from the database. "
+                                  "Respond 'yes' if new data is needed, otherwise respond 'no'."
+                              )
+                          }
+                      ] + messages[-4:]  # Include the last few messages to provide context
 
     messages_to_use.append({
         "role": "user",
@@ -308,7 +314,7 @@ def requires_more_data(prompt, messages=None):
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=200,
+            max_tokens=10,
             temperature=0.0,
             n=1,
         )
@@ -340,14 +346,16 @@ def generate_sql_query(prompt, schema, messages=None, use_previous_response=True
         {
             "role": "system",
             "content": (
-                "Note that the current year is 2024. Generate the query with ILIKE keyword and use '%' sign before and after "
-                "and do not use '=' whenever we use WHERE clause for datatype CHAR, VARCHAR, and TEXT. Use '=' for the rest of the cases. "
-                "You are an assistant that converts user prompts into safe, read-only SQL queries. "
-                "If necessary ask some  clarifying questions when necessary to understand the user's intent better."
-                "Differentiate whether the prompt is fresh or it is reply of clarifying questions"
-                "Effective date is the date on which the order is actually delivered and  ship date is the date on which the delivery was expected "
-                "if effective date > ship date  which means delivery status is late ,if effective date = ship date which means delivery status is On Time,If effective date is null which means delivery status is Pending and if effective date < ship date which means delivery is Early "
-                "Here is the database schema:\n\n" + schema
+                    "Note that the current year is 2024. Generate the query with ILIKE keyword and use '%' sign before and after "
+                    "and do not use '=' whenever we use WHERE clause for datatype CHAR, VARCHAR, and TEXT. Use '=' for the rest of the cases. "
+                    "You are an assistant that converts user prompts into safe, read-only SQL queries. "
+                    " ship_date  is the date on which delievery was expected and  effective_date is the date on which the order is actuallu delievered."
+                    "if effective date > ship order  which means delivery status is late otherwise on time"
+
+                    "You also generate clarifying questions when necessary to understand the user's intent better."
+                    " there  is column invoice_status in sale_order table  where three unique values are present.no invoice means that its state is cancelled ,invoiced means that state=done and to invoice means that state=draft."
+                    "if require, ask some clarifying questions to generate a better response "
+                    "Here is the database schema:\n\n" + schema
             )
         }
     ]
@@ -355,7 +363,7 @@ def generate_sql_query(prompt, schema, messages=None, use_previous_response=True
     # If no messages are passed, fall back to conversation history
     if messages is None and use_previous_response and conversation_history:
         messages = conversation_history[-1]['messages'] if conversation_history else []
-    
+
     # Include the last few messages from the conversation history for context
     if messages:
         messages_to_use += messages[-4:]
@@ -371,7 +379,7 @@ def generate_sql_query(prompt, schema, messages=None, use_previous_response=True
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=5000,
+            max_tokens=1000,
             temperature=0,
             n=1,
         )
@@ -454,14 +462,17 @@ def chunk_data(data, chunk_size=200):
 
 
 response_history = {'previous_response': []}
-def generate_final_response(prompt, db_data, is_follow_up=False, use_previous_response=True):
+
+
+def generate_final_response(prompt, db_data, column_explanations=None, is_follow_up=False, use_previous_response=True):
     """
     Generate the final response by passing the prompt and data to GPT.
     If no data is available from the database, GPT will answer directly.
     """
     logging.debug("Generating final response")
     messages = [
-        {"role": "system", "content": "You are a conversational AI model named Iris born on 2024/10/01 ,that provides informative answers based on user prompts and available data."}
+        {"role": "system",
+         "content": "You are a conversational AI model named Iris born on 2024/10/01, that provides informative answers based on user prompts and available data."}
     ]
 
     # Add conversation history if needed
@@ -535,7 +546,6 @@ def generate_final_response(prompt, db_data, is_follow_up=False, use_previous_re
         except Exception as e:
             logging.error("Error generating GPT response: %s", e)
             return None
-
 
 
 if __name__ == "__main__":
