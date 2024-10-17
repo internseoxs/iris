@@ -1,15 +1,17 @@
 from flask import Flask, request, jsonify, render_template
 import openai
 import psycopg2
+from psycopg2 import pool  # For efficient database connection pooling
 import json
 import sqlparse
 import re
 from decimal import Decimal
 from datetime import datetime, date
 import logging
-import os  # To access environment variables
+import os
+import uuid  # For generating unique chat IDs
 
-app = Flask(__name__)
+app = Flask(__name__)  # Fixed Flask app initialization
 
 # Initialize conversation history
 conversation_history = []
@@ -17,30 +19,77 @@ conversation_history = []
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Load OpenAI API key from environment variable
-openai.api_key = os.getenv('OPENAI_API_KEY')
-if not openai.api_key:
+# Load configuration from environment variables
+
+# Set OpenAI API key
+openai_api_key = os.environ.get('OPENAI_API_KEY')
+if not openai_api_key:
     logging.error('OpenAI API key is missing in the environment variables')
-    raise ValueError('OpenAI API key is missing in environment variables')
+    raise ValueError('OpenAI API key is missing in the environment variables')
+openai.api_key = openai_api_key
 
 # Database connection parameters from environment variables
-DB_HOST = os.getenv('DB_HOST')
-DB_PORT = os.getenv('DB_PORT')
-DB_NAME = os.getenv('DB_NAME')
-DB_USER = os.getenv('DB_USER')
-DB_PASSWORD = os.getenv('DB_PASSWORD')
+
+# Sabre DB1 configuration
+sabre_db_config = {
+    'host': os.environ.get('SABRE_DB_HOST'),
+    'port': os.environ.get('SABRE_DB_PORT'),
+    'dbname': os.environ.get('SABRE_DB_NAME'),
+    'user': os.environ.get('SABRE_DB_USER'),
+    'password': os.environ.get('SABRE_DB_PASSWORD')
+}
+
+missing_sabre_vars = [key for key, value in sabre_db_config.items() if not value]
+if missing_sabre_vars:
+    logging.error(f"Missing environment variables for Sabre DB1: {', '.join(missing_sabre_vars)}")
+    raise ValueError(f"Missing environment variables for Sabre DB1: {', '.join(missing_sabre_vars)}")
+
+# Chat History DB configuration
+chat_history_db_config = {
+    'host': os.environ.get('CHAT_HISTORY_DB_HOST'),
+    'port': os.environ.get('CHAT_HISTORY_DB_PORT'),
+    'dbname': os.environ.get('CHAT_HISTORY_DB_NAME'),
+    'user': os.environ.get('CHAT_HISTORY_DB_USER'),
+    'password': os.environ.get('CHAT_HISTORY_DB_PASSWORD')
+}
+
+missing_chat_history_vars = [key for key, value in chat_history_db_config.items() if not value]
+if missing_chat_history_vars:
+    logging.error(f"Missing environment variables for Chat History DB: {', '.join(missing_chat_history_vars)}")
+    raise ValueError(f"Missing environment variables for Chat History DB: {', '.join(missing_chat_history_vars)}")
+
+# Create connection pools for both databases
+try:
+    sabre_db_pool = psycopg2.pool.SimpleConnectionPool(
+        1,   # Minimum number of connections
+        20,  # Maximum number of connections
+        host=sabre_db_config['host'],
+        port=sabre_db_config['port'],
+        dbname=sabre_db_config['dbname'],
+        user=sabre_db_config['user'],
+        password=sabre_db_config['password']
+    )
+    logging.info("sabre_db1 connection pool created successfully")
+
+    chat_history_pool = psycopg2.pool.SimpleConnectionPool(
+        1,   # Minimum number of connections
+        20,  # Maximum number of connections
+        host=chat_history_db_config['host'],
+        port=chat_history_db_config['port'],
+        dbname=chat_history_db_config['dbname'],
+        user=chat_history_db_config['user'],
+        password=chat_history_db_config['password']
+    )
+    logging.info("chat_history connection pool created successfully")
+except Exception as e:
+    logging.error("Error creating database connection pools: %s", e)
+    raise
 
 def get_database_schema():
-    """Retrieve table and column names from the PostgreSQL database."""
-    logging.debug("Attempting to retrieve database schema")
+    """Retrieve table and column names from the sabre_db1 PostgreSQL database."""
+    logging.debug("Attempting to retrieve database schema from sabre_db1")
     try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD
-        )
+        conn = sabre_db_pool.getconn()
         cursor = conn.cursor()
         cursor.execute("""
             SELECT table_name, column_name
@@ -49,7 +98,7 @@ def get_database_schema():
         """)
         schema = cursor.fetchall()
         cursor.close()
-        conn.close()
+        sabre_db_pool.putconn(conn)
 
         schema_dict = {}
         for table, column in schema:
@@ -57,13 +106,12 @@ def get_database_schema():
                 schema_dict[table] = []
             schema_dict[table].append(column)
 
-        logging.info("Successfully retrieved database schema")
+        logging.info("Successfully retrieved database schema from sabre_db1")
         return schema_dict
 
     except Exception as e:
-        logging.error("Error fetching database schema: %s", e)
+        logging.error("Error fetching database schema from sabre_db1: %s", e)
         return {}
-
 
 def format_schema_for_gpt(schema):
     """Format the schema in a way that can be included in the prompt to GPT."""
@@ -73,6 +121,16 @@ def format_schema_for_gpt(schema):
         formatted_schema += f"Table: {table}\nColumns: {', '.join(columns)}\n\n"
     return formatted_schema
 
+def get_serializable_messages(messages):
+    """Extracts 'role' and 'content' from messages, ensures 'content' is serializable."""
+    serializable_messages = []
+    for msg in messages:
+        serializable_msg = {
+            "role": msg["role"],
+            "content": msg["content"]
+        }
+        serializable_messages.append(serializable_msg)
+    return serializable_messages
 
 @app.route('/edit-prompt', methods=['POST'])
 def edit_prompt():
@@ -109,7 +167,6 @@ def edit_prompt():
         logging.error("Error updating conversation history: %s", e)
         return jsonify({'error': 'An error occurred while editing the prompt'}), 500
 
-
 def generate_response_for_edit(chat_index, message_index):
     """Generates a response for an edited prompt starting from generate_response workflow."""
     chat_session = conversation_history[chat_index]
@@ -124,73 +181,40 @@ def generate_response_for_edit(chat_index, message_index):
 
     schema = get_database_schema()
     if not schema:
-        logging.error("Failed to retrieve database schema")
+        logging.error("Failed to retrieve database schema from sabre_db1")
         return jsonify({'error': 'Failed to retrieve database schema'}), 500
 
     formatted_schema = format_schema_for_gpt(schema)
 
-    # Check if new data is required based on the edited prompt
-    if requires_more_data(prompt, messages):
-        logging.info("New data required for edited prompt")
-        sql_query = generate_sql_query(prompt, formatted_schema, messages)
-        if not sql_query:
-            logging.error("Failed to generate SQL query")
-            return jsonify({'error': 'Failed to generate SQL query'}), 500
+    # Determine if new data is needed based on the current prompt
+    requires_data = requires_more_data(prompt, messages)
+    logging.info("Determined that new data is %s for the prompt", "required" if requires_data else "not required")
 
-        # Execute the SQL query and retrieve data
-        new_data = execute_sql_query(sql_query)
-        if new_data is None:
-            logging.warning("SQL execution failed, proceeding with empty data")
-            new_data = []  # Proceed with empty data if SQL execution failed
+    # Determine if the new prompt is related to previous prompts
+    previous_prompts = [msg['content'] for msg in messages if msg['role'] == 'user' and msg['content'] != prompt]
+    is_related = is_related_to_previous_prompt(prompt, previous_prompts)
+    logging.info("Determined that edited prompt is %s to previous prompts", "related" if is_related else "not related")
 
-        # Store the new data in conversation history as a new entry
-        messages.append({
-            "role": "assistant",
-            "content": f"Data Retrieved: {json.dumps(new_data, default=convert_to_serializable)}"
-        })
-    else:
-        logging.info("No new data required for edited prompt")
-        new_data = None
-
-    # Generate the final response based on the edited prompt
-    final_response = generate_final_response(prompt, new_data, messages)
-    if not final_response:
-        logging.error("Failed to generate final response")
-        return jsonify({'error': 'Failed to generate final response'}), 500
-
-    # Insert the assistant's response directly after the edited prompt
-    messages.insert(message_index + 1, {
-        "role": "assistant",
-        "content": final_response
-    })
-    logging.debug("Assistant's response to edited prompt added to conversation history")
-
-    # Return the final response to the frontend
-    return jsonify({'response': final_response})
-
+    response = process_data_and_generate_response(prompt, formatted_schema, messages, requires_data, is_related)
+    return response
 
 def is_incomplete_prompt(prompt):
     # Example rule-based logic (you can customize this)
-    if len(prompt.split()) < 5:  # If the prompt is less than 5 words
+    if len(prompt.strip()) == 0:
         return True
-    if '?' not in prompt and len(prompt.split()) < 10:  # If the prompt has no questions and is too short
-        return True
-    # Add other checks as needed
+    # Additional checks can be added here
     return False
-
 
 @app.route("/", methods=["GET"])
 def index():
     logging.info("Rendering index page")
     return render_template("index.html")
 
-
 @app.route("/chat-history", methods=["GET"])
 def chat_history_route():
     """Endpoint to fetch the chat history."""
     logging.info("Fetching chat history")
     return jsonify({'history': conversation_history})
-
 
 @app.route("/submit_query", methods=["POST"])
 def submit_query():
@@ -201,7 +225,6 @@ def submit_query():
     logging.info("Received prompt in submit_query: %s", prompt)
     return render_template("about.html", prompt=prompt)
 
-
 @app.route('/generate-response', methods=['POST'])
 def generate_response():
     data = request.get_json()
@@ -209,12 +232,16 @@ def generate_response():
         logging.warning("No prompt provided in generate_response")
         return jsonify({'error': 'No prompt provided'}), 400
 
-    prompt = data['prompt']
-    logging.info("Received prompt in generate_response: %s", prompt)
+    user_input = data['prompt']
+    logging.info("Received prompt in generate_response: %s", user_input)
+
+    if is_incomplete_prompt(user_input):
+        logging.warning("Incomplete prompt provided")
+        return jsonify({'error': 'Incomplete prompt provided'}), 400
 
     schema = get_database_schema()
     if not schema:
-        logging.error("Failed to retrieve database schema")
+        logging.error("Failed to retrieve database schema from sabre_db1")
         return jsonify({'error': 'Failed to retrieve database schema'}), 500
 
     formatted_schema = format_schema_for_gpt(schema)
@@ -228,82 +255,187 @@ def generate_response():
     messages = chat_session['messages']
 
     # Append the user's prompt to conversation history
-    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "user", "content": user_input})
     logging.debug("Updated conversation history: %s", messages)
 
+    # Get previous prompts
+    previous_prompts = [msg['content'] for msg in messages if msg['role'] == 'user' and msg['content'] != user_input]
+
+    # Determine if the new prompt is related to previous prompts
+    is_related = is_related_to_previous_prompt(user_input, previous_prompts)
+    logging.info("Determined that new prompt is %s to previous prompts", "related" if is_related else "not related")
+
     # Determine if new data is needed based on the current prompt
-    if requires_more_data(prompt, messages):
-        logging.info("Determined that new data is required for the prompt")
-        sql_query = generate_sql_query(prompt, formatted_schema, messages)
-        if not sql_query:
-            logging.error("Failed to generate SQL query")
-            return jsonify({'error': 'Failed to generate SQL query'}), 500
+    requires_data = requires_more_data(user_input, messages)
+    logging.info("Determined that new data is %s for the prompt", "required" if requires_data else "not required")
 
-        # Log the generated SQL query
-        logging.info("Generated SQL query: %s", sql_query)
+    response = process_data_and_generate_response(user_input, formatted_schema, messages, requires_data, is_related)
+    return response
 
-        new_data = execute_sql_query(sql_query)
+def process_data_and_generate_response(prompt, formatted_schema, messages, requires_data, is_related):
+    """Process data and generate response based on the prompt, whether data is required, and if it's related to previous prompts."""
+    max_attempts = 2  # Maximum number of attempts to correct the SQL query
+    attempt = 0
+    sql_query = None
+    new_data = None
+    error_message = None
+
+    if requires_data:
+        previous_sql_query = None
+        previous_data = None
+
+        if is_related:
+            # If the prompt is related to previous prompts, try to use previous SQL query and data
+            for message in reversed(messages):
+                if message['role'] == 'assistant' and 'sql_query' in message and 'data' in message:
+                    previous_sql_query = message['sql_query']
+                    previous_data = message['data']
+                    break
+
+        while attempt < max_attempts:
+            attempt += 1
+            if attempt == 1:
+                # First attempt: Generate SQL query normally, using previous query/data if available
+                sql_query = generate_sql_query(prompt, formatted_schema, messages, previous_sql_query, previous_data)
+            else:
+                # Subsequent attempts: Correct the SQL query based on the error
+                if error_message:
+                    sql_query = correct_sql_query(sql_query, error_message, formatted_schema, messages, previous_sql_query, previous_data)
+                else:
+                    break  # Cannot proceed without an error message
+
+            if not sql_query:
+                logging.error("Failed to generate SQL query on attempt %d", attempt)
+                break
+
+            logging.info("Attempting to execute SQL query: %s", sql_query)
+
+            # Execute the SQL query
+            new_data, error_message = execute_sql_query(sql_query)
+            if new_data is not None:
+                # Success
+                # Do not include 'sql_query' and 'data' in messages passed to OpenAI API
+                messages.append({
+                    "role": "assistant",
+                    "content": f"Data Retrieved."
+                })
+                # Store 'sql_query' and 'data' separately in the message, but these won't be sent to OpenAI API
+                messages[-1]['sql_query'] = sql_query
+                messages[-1]['data'] = new_data
+                logging.debug("Data retrieved and added to conversation history")
+                break
+            else:
+                logging.error("SQL query execution failed on attempt %d with error: %s", attempt, error_message)
+
         if new_data is None:
-            logging.warning("SQL execution failed, proceeding with empty data")
-            new_data = []  # Proceed with empty data if SQL execution failed
+            # All attempts failed
+            logging.error("All attempts to execute SQL query failed")
+            # Let ChatGPT answer the prompt without data
+            final_response = generate_final_response(prompt, None, messages)
+            if not final_response:
+                logging.error("Failed to generate final response")
+                return jsonify({'error': 'Failed to generate final response'}), 500
 
-        # Store the new data in conversation history
-        messages.append({
-            "role": "assistant",
-            "content": f"Data Retrieved: {json.dumps(new_data, default=convert_to_serializable)}"
-        })
-        logging.debug("Data retrieved and added to conversation history")
+            # Append the assistant's response to conversation history
+            messages.append({"role": "assistant", "content": final_response})
+            logging.debug("Assistant's response added to conversation history")
+
+            # Save to database
+            save_interaction_to_db(prompt, final_response)
+            # Note: Since no SQL query or data was used, we don't pass them here
+
+            logging.info("Returning final response to the user")
+            return jsonify({'response': final_response})
+        else:
+            # Generate the final response using the data retrieved
+            final_response = generate_final_response(prompt, new_data, messages)
+            if not final_response:
+                logging.error("Failed to generate final response")
+                return jsonify({'error': 'Failed to generate final response'}), 500
+
+            # Append the assistant's response to conversation history
+            messages.append({"role": "assistant", "content": final_response})
+            logging.debug("Assistant's response added to conversation history")
+
+            # Save to database, including sql_query and data
+            save_interaction_to_db(prompt, final_response, sql_query, new_data)
+
+            logging.info("Returning final response to the user")
+            return jsonify({'response': final_response})
     else:
-        logging.info("No new data required for the prompt")
-        new_data = None
+        # If data is not required, generate final response without fetching data
+        final_response = generate_final_response(prompt, None, messages)
+        if not final_response:
+            logging.error("Failed to generate final response")
+            return jsonify({'error': 'Failed to generate final response'}), 500
 
-    # Generate the final response
-    final_response = generate_final_response(prompt, new_data, messages)
-    if not final_response:
-        logging.error("Failed to generate final response")
-        return jsonify({'error': 'Failed to generate final response'}), 500
+        # Append the assistant's response to conversation history
+        messages.append({"role": "assistant", "content": final_response})
+        logging.debug("Assistant's response added to conversation history")
 
-    # Append the assistant's response to conversation history
-    messages.append({"role": "assistant", "content": final_response})
-    logging.debug("Assistant's response added to conversation history")
+        # Save to database
+        save_interaction_to_db(prompt, final_response)
+        # Note: Since no SQL query or data was used, we don't pass them here
 
-    logging.info("Returning final response to the user")
-    return jsonify({'response': final_response})
+        logging.info("Returning final response to the user")
+        return jsonify({'response': final_response})
 
+def save_interaction_to_db(user_input, bot_response, sql_query=None, data=None):
+    """Save the user input and bot response to the chat_history database."""
+    try:
+        conn = chat_history_pool.getconn()
+        cursor = conn.cursor()
 
-@app.route("/reset", methods=["POST"])
-def reset():
-    """Reset the conversation history and redirect to the home page."""
-    global conversation_history
-    conversation_history.clear()  # Clear the conversation history
-    logging.info("Conversation history cleared via reset endpoint")
-    return jsonify({"message": "Conversation history cleared."}), 200
+        # Insert into chats table
+        cursor.execute("""
+            INSERT INTO chats (user_message, bot_response)
+            VALUES (%s, %s)
+            RETURNING id;
+        """, (user_input, bot_response))
+        chat_id = cursor.fetchone()[0]  # Get the ID of the inserted chat
 
+        # Generate a UUID for the chat_id in response_history
+        chat_uuid = str(uuid.uuid4())
+
+        # Insert into response_history table, including sql_query and data if available
+        cursor.execute("""
+            INSERT INTO response_history (chat_id, user_input, bot_response, sql_query, data)
+            VALUES (%s, %s, %s, %s, %s);
+        """, (
+            chat_uuid,
+            user_input,
+            bot_response,
+            sql_query,
+            json.dumps(data, default=convert_to_serializable) if data else None
+        ))
+
+        conn.commit()
+        logging.info("Successfully stored chat with ID %s and response history with chat UUID %s", chat_id, chat_uuid)
+    except Exception as e:
+        logging.error("Error saving interaction to chat_history database: %s", e)
+    finally:
+        cursor.close()
+        chat_history_pool.putconn(conn)
 
 def requires_more_data(prompt, messages=None):
     """Determine if the prompt requires more data from the database."""
     logging.debug("Checking if more data is required for the prompt")
 
-    # If no data has been retrieved yet, we need to fetch data
     if messages is None:
         # Fallback to global conversation history if no messages are passed
         messages = conversation_history[-1]['messages'] if conversation_history else []
 
-    data_retrieved = any('Data Retrieved' in message.get('content', '') for message in messages)
-    if not data_retrieved:
-        logging.info("No data retrieved yet; need to fetch new data")
-        return True  # Need to fetch new data
-
-    # Use the last few messages to provide context
+    # Use GPT to determine if new data is needed
     messages_to_use = [
-                          {
-                              "role": "system",
-                              "content": (
-                                  "You are a conversational AI model that determines if the user's query requires new data from the database. "
-                                  "Respond 'yes' if new data is needed, otherwise respond 'no'."
-                              )
-                          }
-                      ] + messages[-4:]  # Include the last few messages to provide context
+        {
+            "role": "system",
+            "content": (
+                "As an AI assistant, determine if the user's prompt requires fresh data from the database to generate an accurate response. "
+                "Respond with 'yes' if new data is needed or 'no' if it can be answered with previous data or without any data. "
+                "Only respond with 'yes' or 'no'."
+            )
+        }
+    ] + get_serializable_messages(messages[-4:])  # Include the last few messages for context
 
     messages_to_use.append({
         "role": "user",
@@ -314,7 +446,7 @@ def requires_more_data(prompt, messages=None):
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=10,
+            max_tokens=500,
             temperature=0.0,
             n=1,
         )
@@ -325,53 +457,85 @@ def requires_more_data(prompt, messages=None):
         logging.error("Error determining if more data is needed: %s", e)
         return True  # Default to needing more data if GPT fails
 
+def is_related_to_previous_prompt(new_prompt, previous_prompts):
+    """Determine if the new prompt is related to the previous prompts."""
+    logging.debug("Checking if the new prompt is related to previous prompts")
+
+    # Combine previous prompts into a single string
+    previous_conversation = "\n".join(previous_prompts[-4:])  # Consider the last 4 prompts for context
+
+    # Use GPT to analyze the relation between new_prompt and previous_prompts
+    messages_to_use = [
+        {
+            "role": "system",
+            "content": (
+                "As an AI assistant, determine if the user's new prompt is related to the previous conversation. "
+                "Respond with 'yes' if the new prompt is related or 'no' if it is not related. "
+                "Only respond with 'yes' or 'no'."
+            )
+        },
+        {
+            "role": "user",
+            "content": f"Previous conversation:\n{previous_conversation}\n\nNew prompt:\n{new_prompt}\n\nIs the new prompt related to the previous conversation?"
+        }
+    ]
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=messages_to_use,
+            max_tokens=500,
+            temperature=0.0,
+            n=1,
+        )
+        answer = response.choices[0].message['content'].strip().lower()
+        logging.info("GPT response for is_related_to_previous_prompt: %s", answer)
+        return answer == 'yes'
+    except Exception as e:
+        logging.error("Error determining if prompt is related to previous prompts: %s", e)
+        return False  # Default to not related if GPT fails
 
 def ensure_semicolon(sql_query):
     """Ensure the SQL query starts with SELECT and ends with a semicolon."""
     logging.debug("Ensuring SQL query is properly formatted")
-    pattern = r"\bSELECT\b.*?(?=;|$)"
+    pattern = r"SELECT\b.*?(?=;|$)"
     match = re.search(pattern, sql_query, re.IGNORECASE | re.DOTALL)
     if match:
         sql_query = match.group(0).strip()
         return sql_query + ';' if not sql_query.endswith(';') else sql_query
     return sql_query
 
-
-def generate_sql_query(prompt, schema, messages=None, use_previous_response=True):
+def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, previous_data=None):
     """Generate SQL query based on user prompt, schema, and conversation history."""
     logging.debug("Generating SQL query based on the prompt")
 
     # Create the base system message with instructions and schema
-    messages_to_use = [
-        {
-            "role": "system",
-            "content": (
-                    "Note that the current year is 2024. Generate the query with ILIKE keyword and use '%' sign before and after "
-                    "and do not use '=' whenever we use WHERE clause for datatype CHAR, VARCHAR, and TEXT. Use '=' for the rest of the cases. "
-                    "You are an assistant that converts user prompts into safe, read-only SQL queries. "
-                    " ship_date  is the date on which delievery was expected and  effective_date is the date on which the order is actuallu delievered."
-                    "if effective date > ship order  which means delivery status is late otherwise on time"
+    system_prompt = (
+        "As a SQL expert, generate a safe, read-only SQL query based on the user's prompt and the provided database schema. "
+        "Determine what data is needed to answer the prompt. The query should fetch necessary data for analysis. "
+        "Ensure the query is syntactically correct and optimized. Do not ask for clarification."
+        "\n\n"
+        "Database Schema:\n" + schema
+    )
 
-                    "You also generate clarifying questions when necessary to understand the user's intent better."
-                    " there  is column invoice_status in sale_order table  where three unique values are present.no invoice means that its state is cancelled ,invoiced means that state=done and to invoice means that state=draft."
-                    "if require, ask some clarifying questions to generate a better response "
-                    "Here is the database schema:\n\n" + schema
-            )
-        }
-    ]
+    if previous_sql_query and previous_data:
+        # Include previous query and a sample of previous data
+        sample_data = previous_data[:5] if len(previous_data) > 5 else previous_data
+        system_prompt += (
+            "\n\nPrevious SQL Query:\n" + previous_sql_query +
+            "\n\nPrevious Data (first few rows):\n" + json.dumps(sample_data, default=convert_to_serializable)
+        )
 
-    # If no messages are passed, fall back to conversation history
-    if messages is None and use_previous_response and conversation_history:
-        messages = conversation_history[-1]['messages'] if conversation_history else []
+    messages_to_use = [{"role": "system", "content": system_prompt}]
 
     # Include the last few messages from the conversation history for context
     if messages:
-        messages_to_use += messages[-4:]
+        messages_to_use += get_serializable_messages(messages[-4:])
 
     # Append the user's prompt
     messages_to_use.append({
         "role": "user",
-        "content": f"Generate an SQL query for the following prompt: {prompt}"
+        "content": f"Generate an SQL query that retrieves the necessary data to answer the following analytical prompt. Do not include unnecessary data.\nPrompt: {prompt}"
     })
 
     try:
@@ -379,8 +543,8 @@ def generate_sql_query(prompt, schema, messages=None, use_previous_response=True
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=1000,
-            temperature=0,
+            max_tokens=500,
+            temperature=0.0,
             n=1,
         )
         sql_query = response.choices[0].message['content'].strip()
@@ -393,6 +557,52 @@ def generate_sql_query(prompt, schema, messages=None, use_previous_response=True
         logging.error("Error generating SQL query: %s", e)
         return None
 
+def correct_sql_query(original_query, error_message, schema, messages=None, previous_sql_query=None, previous_data=None):
+    """Generate a corrected SQL query based on the error message."""
+    logging.debug("Generating corrected SQL query based on error message")
+
+    # Create the base system message with instructions and schema
+    system_prompt = (
+        "As a SQL expert, you have attempted to execute the following SQL query but encountered an error. "
+        "Your task is to correct the SQL query based on the error message provided. Do not ask for clarification. "
+        "Provide only the corrected SQL query.\n\n"
+        "Original SQL Query:\n" + original_query +
+        "\n\nError Message:\n" + error_message +
+        "\n\nDatabase Schema:\n" + schema
+    )
+
+    if previous_sql_query and previous_data:
+        # Include previous query and a sample of previous data
+        sample_data = previous_data[:5] if len(previous_data) > 5 else previous_data
+        system_prompt += (
+            "\n\nPrevious SQL Query:\n" + previous_sql_query +
+            "\n\nPrevious Data (first few rows):\n" + json.dumps(sample_data, default=convert_to_serializable)
+        )
+
+    messages_to_use = [{"role": "system", "content": system_prompt}]
+
+    # Include the last few messages from the conversation history for context
+    if messages:
+        messages_to_use += get_serializable_messages(messages[-4:])
+
+    try:
+        # Call GPT to generate the corrected SQL query
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=messages_to_use,
+            max_tokens=500,
+            temperature=0.0,
+            n=1,
+        )
+        corrected_sql_query = response.choices[0].message['content'].strip()
+        logging.info("Corrected SQL query generated by GPT: %s", corrected_sql_query)
+
+        # Ensure the query is properly terminated with a semicolon
+        return ensure_semicolon(corrected_sql_query)
+
+    except Exception as e:
+        logging.error("Error generating corrected SQL query: %s", e)
+        return None
 
 def is_safe_sql(sql_query):
     """Check if the SQL query is safe and read-only."""
@@ -407,38 +617,31 @@ def is_safe_sql(sql_query):
         logging.error("Error parsing SQL query: %s", e)
         return False
 
-
 def execute_sql_query(sql_query):
-    """Execute the SQL query and return the result."""
+    """Execute the SQL query and return the result along with any error message."""
     logging.debug("Executing SQL query")
     if not is_safe_sql(sql_query):
         logging.warning("Unsafe SQL query detected, not executing: %s", sql_query)
-        return []  # Return an empty list to proceed with GPT response
+        return None, "Unsafe SQL query detected."
 
     try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD
-        )
+        conn = sabre_db_pool.getconn()
         cursor = conn.cursor()
         cursor.execute(sql_query)
         logging.info("SQL query executed successfully")
 
         # Fetch limited results to prevent sending too much data
-        results = cursor.fetchmany(500)  # Fetch up to 500 rows
+        results = cursor.fetchmany(1000)  # Fetch up to 1000 rows
         colnames = [desc[0] for desc in cursor.description]
         cursor.close()
-        conn.close()
+        sabre_db_pool.putconn(conn)
 
         logging.debug("Number of rows fetched: %d", len(results))
-        return [dict(zip(colnames, row)) for row in results] if results else []
+        data = [dict(zip(colnames, row)) for row in results] if results else []
+        return data, None  # No error
     except Exception as e:
         logging.error("Error executing SQL query: %s", e)
-        return []  # Return an empty list to allow GPT to handle the response
-
+        return None, str(e)  # Return error message
 
 def convert_to_serializable(obj):
     """Convert non-serializable objects to serializable ones."""
@@ -453,51 +656,44 @@ def convert_to_serializable(obj):
     else:
         return obj
 
-
 def chunk_data(data, chunk_size=200):
     """Split data into chunks of specified size."""
     logging.debug("Chunking data into sizes of %d", chunk_size)
     for i in range(0, len(data), chunk_size):
         yield data[i:i + chunk_size]
 
-
-response_history = {'previous_response': []}
-
-
-def generate_final_response(prompt, db_data, column_explanations=None, is_follow_up=False, use_previous_response=True):
+def generate_final_response(prompt, db_data, messages=None):
     """
     Generate the final response by passing the prompt and data to GPT.
     If no data is available from the database, GPT will answer directly.
     """
     logging.debug("Generating final response")
-    messages = [
+    messages_to_use = [
         {"role": "system",
-         "content": "You are a conversational AI model named Iris born on 2024/10/01, that provides informative answers based on user prompts and available data."}
+         "content": "You are a data analyst assistant who provides detailed answers and insights based on the user's prompt and provided data. Use your analytical skills to interpret the data and provide actionable recommendations."}
     ]
 
-    # Add conversation history if needed
-    if use_previous_response and is_follow_up:
-        previous_response = response_history.get('previous_response', [])
-        messages.append({
-            "role": "assistant",
-            "content": f"Previous Response: {json.dumps(previous_response, default=convert_to_serializable)}"
-        })
-        logging.debug("Included previous response in messages")
+    # Include the conversation history for context
+    if messages:
+        messages_to_use += get_serializable_messages(messages[-6:])  # Include the last few messages
 
     if db_data:
         # Process database data and chunk it if necessary due to token limits
         db_data_serializable = convert_to_serializable(db_data)
-        data_chunks = list(chunk_data(db_data_serializable))
+        data_chunks = list(chunk_data(db_data_serializable, chunk_size=50))  # Reduce chunk size if necessary
         logging.debug("Data has been serialized and chunked")
 
         # Handle multi-chunk responses due to token constraints
-        final_response = []
+        final_response_parts = []
         for idx, chunk in enumerate(data_chunks):
             logging.debug("Processing chunk %d/%d", idx + 1, len(data_chunks))
-            temp_messages = messages.copy()
+            temp_messages = messages_to_use.copy()
             temp_messages.append({
                 "role": "user",
-                "content": f"Prompt: {prompt}\nData: {json.dumps(chunk)}"
+                "content": (
+                    f"Based on the following data, {prompt}\n"
+                    f"Data: {json.dumps(chunk, default=convert_to_serializable)}"
+                )
             })
 
             try:
@@ -505,12 +701,12 @@ def generate_final_response(prompt, db_data, column_explanations=None, is_follow
                     model="gpt-4o-mini",
                     messages=temp_messages,
                     max_tokens=5000,
-                    temperature=0.7,  # Matching temperature from the second version
+                    temperature=0.7,
                     n=1,
                 )
                 # Clean the response before appending
-                chunk_response = response.choices[0].message['content'].strip().replace('', '')
-                final_response.append(chunk_response)
+                chunk_response = response.choices[0].message['content'].strip()
+                final_response_parts.append(chunk_response)
                 logging.debug("Received response for chunk %d", idx + 1)
 
             except Exception as e:
@@ -518,35 +714,402 @@ def generate_final_response(prompt, db_data, column_explanations=None, is_follow
                 return None
 
         logging.info("Successfully generated final response using data")
-        return " ".join(final_response)
+        return "\n".join(final_response_parts)
 
     else:
         # No new data; generate response based on previous context
-        messages.append({
+        temp_messages = messages_to_use.copy()
+        temp_messages.append({
             "role": "user",
-            "content": f"Based on the previous data, {prompt}"
+            "content": f"{prompt}"
         })
-        logging.debug("No new data available; generating response based on previous context")
+        logging.debug("No new data available; generating response based on the prompt")
 
         try:
             response = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
-                messages=messages,
-                max_tokens=5000,
+                messages=temp_messages,
+                max_tokens=8000,
                 temperature=0.7,
                 n=1,
             )
             logging.info("Successfully generated final response without new data")
             final_response = response.choices[0].message['content'].strip()
-
-            # Clean the response
-            final_response = final_response.replace('', '')  # Removing double asterisks
             return final_response
 
         except Exception as e:
             logging.error("Error generating GPT response: %s", e)
             return None
 
+def save_interaction_to_db(user_input, bot_response, sql_query=None, data=None):
+    """Save the user input and bot response to the chat_history database."""
+    try:
+        conn = chat_history_pool.getconn()
+        cursor = conn.cursor()
 
-if __name__ == "__main__":
+        # Insert into chats table
+        cursor.execute("""
+            INSERT INTO chats (user_message, bot_response)
+            VALUES (%s, %s)
+            RETURNING id;
+        """, (user_input, bot_response))
+        chat_id = cursor.fetchone()[0]  # Get the ID of the inserted chat
+
+        # Generate a UUID for the chat_id in response_history
+        chat_uuid = str(uuid.uuid4())
+
+        # Insert into response_history table, including sql_query and data if available
+        cursor.execute("""
+            INSERT INTO response_history (chat_id, user_input, bot_response, sql_query, data)
+            VALUES (%s, %s, %s, %s, %s);
+        """, (
+            chat_uuid,
+            user_input,
+            bot_response,
+            sql_query,
+            json.dumps(data, default=convert_to_serializable) if data else None
+        ))
+
+        conn.commit()
+        logging.info("Successfully stored chat with ID %s and response history with chat UUID %s", chat_id, chat_uuid)
+    except Exception as e:
+        logging.error("Error saving interaction to chat_history database: %s", e)
+    finally:
+        cursor.close()
+        chat_history_pool.putconn(conn)
+
+@app.route("/reset", methods=["POST"])
+def reset():
+    """Reset the conversation history and redirect to the home page."""
+    global conversation_history
+    conversation_history.clear()  # Clear the conversation history
+    logging.info("Conversation history cleared via reset endpoint")
+    return jsonify({"message": "Conversation history cleared."}), 200
+
+def requires_more_data(prompt, messages=None):
+    """Determine if the prompt requires more data from the database."""
+    logging.debug("Checking if more data is required for the prompt")
+
+    if messages is None:
+        # Fallback to global conversation history if no messages are passed
+        messages = conversation_history[-1]['messages'] if conversation_history else []
+
+    # Use GPT to determine if new data is needed
+    messages_to_use = [
+        {
+            "role": "system",
+            "content": (
+                "As an AI assistant, determine if the user's prompt requires fresh data from the database to generate an accurate response. "
+                "Respond with 'yes' if new data is needed or 'no' if it can be answered with previous data or without any data. "
+                "Only respond with 'yes' or 'no'."
+            )
+        }
+    ] + get_serializable_messages(messages[-4:])  # Include the last few messages for context
+
+    messages_to_use.append({
+        "role": "user",
+        "content": f"Does the following prompt require new data? {prompt}"
+    })
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=messages_to_use,
+            max_tokens=500,
+            temperature=0.0,
+            n=1,
+        )
+        answer = response.choices[0].message['content'].strip().lower()
+        logging.info("GPT response for requires_more_data: %s", answer)
+        return answer == 'yes'
+    except Exception as e:
+        logging.error("Error determining if more data is needed: %s", e)
+        return True  # Default to needing more data if GPT fails
+
+def is_related_to_previous_prompt(new_prompt, previous_prompts):
+    """Determine if the new prompt is related to the previous prompts."""
+    logging.debug("Checking if the new prompt is related to previous prompts")
+
+    # Combine previous prompts into a single string
+    previous_conversation = "\n".join(previous_prompts[-4:])  # Consider the last 4 prompts for context
+
+    # Use GPT to analyze the relation between new_prompt and previous_prompts
+    messages_to_use = [
+        {
+            "role": "system",
+            "content": (
+                "As an AI assistant, determine if the user's new prompt is related to the previous conversation. "
+                "Respond with 'yes' if the new prompt is related or 'no' if it is not related. "
+                "Only respond with 'yes' or 'no'."
+            )
+        },
+        {
+            "role": "user",
+            "content": f"Previous conversation:\n{previous_conversation}\n\nNew prompt:\n{new_prompt}\n\nIs the new prompt related to the previous conversation?"
+        }
+    ]
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=messages_to_use,
+            max_tokens=500,
+            temperature=0.0,
+            n=1,
+        )
+        answer = response.choices[0].message['content'].strip().lower()
+        logging.info("GPT response for is_related_to_previous_prompt: %s", answer)
+        return answer == 'yes'
+    except Exception as e:
+        logging.error("Error determining if prompt is related to previous prompts: %s", e)
+        return False  # Default to not related if GPT fails
+
+def ensure_semicolon(sql_query):
+    """Ensure the SQL query starts with SELECT and ends with a semicolon."""
+    logging.debug("Ensuring SQL query is properly formatted")
+    pattern = r"SELECT\b.*?(?=;|$)"
+    match = re.search(pattern, sql_query, re.IGNORECASE | re.DOTALL)
+    if match:
+        sql_query = match.group(0).strip()
+        return sql_query + ';' if not sql_query.endswith(';') else sql_query
+    return sql_query
+
+def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, previous_data=None):
+    """Generate SQL query based on user prompt, schema, and conversation history."""
+    logging.debug("Generating SQL query based on the prompt")
+
+    # Create the base system message with instructions and schema
+    system_prompt = (
+        "As a SQL expert, generate a safe, read-only SQL query based on the user's prompt and the provided database schema. "
+        "Determine what data is needed to answer the prompt. The query should fetch necessary data for analysis. "
+        "Ensure the query is syntactically correct and optimized. Do not ask for clarification."
+        "if required  if effective date is greater than ship date then orders are late ,if effective date is lesser and equal to ship date then its on time."
+        "\n\n"
+        "Database Schema:\n" + schema
+    )
+
+    if previous_sql_query and previous_data:
+        # Include previous query and a sample of previous data
+        sample_data = previous_data[:5] if len(previous_data) > 5 else previous_data
+        system_prompt += (
+            "\n\nPrevious SQL Query:\n" + previous_sql_query +
+            "\n\nPrevious Data (first few rows):\n" + json.dumps(sample_data, default=convert_to_serializable)
+        )
+
+    messages_to_use = [{"role": "system", "content": system_prompt}]
+
+    # Include the last few messages from the conversation history for context
+    if messages:
+        messages_to_use += get_serializable_messages(messages[-4:])
+
+    # Append the user's prompt
+    messages_to_use.append({
+        "role": "user",
+        "content": f"Generate an SQL query that retrieves the necessary data to answer the following analytical prompt. Do not include unnecessary data.\nPrompt: {prompt}"
+    })
+
+    try:
+        # Call GPT to generate the SQL query
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=messages_to_use,
+            max_tokens=500,
+            temperature=0.0,
+            n=1,
+        )
+        sql_query = response.choices[0].message['content'].strip()
+        logging.info("SQL query generated by GPT: %s", sql_query)
+
+        # Ensure the query is properly terminated with a semicolon
+        return ensure_semicolon(sql_query)
+
+    except Exception as e:
+        logging.error("Error generating SQL query: %s", e)
+        return None
+
+def correct_sql_query(original_query, error_message, schema, messages=None, previous_sql_query=None, previous_data=None):
+    """Generate a corrected SQL query based on the error message."""
+    logging.debug("Generating corrected SQL query based on error message")
+
+    # Create the base system message with instructions and schema
+    system_prompt = (
+        "As a SQL expert, you have attempted to execute the following SQL query but encountered an error. "
+        "Your task is to correct the SQL query based on the error message provided. Do not ask for clarification. "
+        "Provide only the corrected SQL query.\n\n"
+        "Original SQL Query:\n" + original_query +
+        "\n\nError Message:\n" + error_message +
+        "\n\nDatabase Schema:\n" + schema
+    )
+
+    if previous_sql_query and previous_data:
+        # Include previous query and a sample of previous data
+        sample_data = previous_data[:5] if len(previous_data) > 5 else previous_data
+        system_prompt += (
+            "\n\nPrevious SQL Query:\n" + previous_sql_query +
+            "\n\nPrevious Data (first few rows):\n" + json.dumps(sample_data, default=convert_to_serializable)
+        )
+
+    messages_to_use = [{"role": "system", "content": system_prompt}]
+
+    # Include the last few messages from the conversation history for context
+    if messages:
+        messages_to_use += get_serializable_messages(messages[-4:])
+
+    try:
+        # Call GPT to generate the corrected SQL query
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=messages_to_use,
+            max_tokens=500,
+            temperature=0.0,
+            n=1,
+        )
+        corrected_sql_query = response.choices[0].message['content'].strip()
+        logging.info("Corrected SQL query generated by GPT: %s", corrected_sql_query)
+
+        # Ensure the query is properly terminated with a semicolon
+        return ensure_semicolon(corrected_sql_query)
+
+    except Exception as e:
+        logging.error("Error generating corrected SQL query: %s", e)
+        return None
+
+def is_safe_sql(sql_query):
+    """Check if the SQL query is safe and read-only."""
+    logging.debug("Checking if the SQL query is safe")
+    try:
+        parsed = sqlparse.parse(sql_query)
+        safe = all(statement.get_type() == 'SELECT' for statement in parsed)
+        if not safe:
+            logging.warning("SQL query is not safe: %s", sql_query)
+        return safe
+    except Exception as e:
+        logging.error("Error parsing SQL query: %s", e)
+        return False
+
+def execute_sql_query(sql_query):
+    """Execute the SQL query and return the result along with any error message."""
+    logging.debug("Executing SQL query")
+    if not is_safe_sql(sql_query):
+        logging.warning("Unsafe SQL query detected, not executing: %s", sql_query)
+        return None, "Unsafe SQL query detected."
+
+    try:
+        conn = sabre_db_pool.getconn()
+        cursor = conn.cursor()
+        cursor.execute(sql_query)
+        logging.info("SQL query executed successfully")
+
+        # Fetch limited results to prevent sending too much data
+        results = cursor.fetchmany(1000)  # Fetch up to 1000 rows
+        colnames = [desc[0] for desc in cursor.description]
+        cursor.close()
+        sabre_db_pool.putconn(conn)
+
+        logging.debug("Number of rows fetched: %d", len(results))
+        data = [dict(zip(colnames, row)) for row in results] if results else []
+        return data, None  # No error
+    except Exception as e:
+        logging.error("Error executing SQL query: %s", e)
+        return None, str(e)  # Return error message
+
+def convert_to_serializable(obj):
+    """Convert non-serializable objects to serializable ones."""
+    if isinstance(obj, list):
+        return [convert_to_serializable(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_to_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, Decimal):
+        return float(obj)  # Convert Decimal to float
+    elif isinstance(obj, (datetime, date)):
+        return obj.isoformat()  # Convert datetime/date to ISO 8601 string
+    else:
+        return obj
+
+def chunk_data(data, chunk_size=200):
+    """Split data into chunks of specified size."""
+    logging.debug("Chunking data into sizes of %d", chunk_size)
+    for i in range(0, len(data), chunk_size):
+        yield data[i:i + chunk_size]
+
+def generate_final_response(prompt, db_data, messages=None):
+    """
+    Generate the final response by passing the prompt and data to GPT.
+    If no data is available from the database, GPT will answer directly.
+    """
+    logging.debug("Generating final response")
+    messages_to_use = [
+        {"role": "system",
+         "content": "You are a data analyst assistant who provides detailed answers and insights based on the user's prompt and provided data. Use your analytical skills to interpret the data and provide actionable recommendations."}
+    ]
+
+    # Include the conversation history for context
+    if messages:
+        messages_to_use += get_serializable_messages(messages[-6:])  # Include the last few messages
+
+    if db_data:
+        # Process database data and chunk it if necessary due to token limits
+        db_data_serializable = convert_to_serializable(db_data)
+        data_chunks = list(chunk_data(db_data_serializable, chunk_size=50))  # Reduce chunk size if necessary
+        logging.debug("Data has been serialized and chunked")
+
+        # Handle multi-chunk responses due to token constraints
+        final_response_parts = []
+        for idx, chunk in enumerate(data_chunks):
+            logging.debug("Processing chunk %d/%d", idx + 1, len(data_chunks))
+            temp_messages = messages_to_use.copy()
+            temp_messages.append({
+                "role": "user",
+                "content": (
+                    f"Based on the following data, {prompt}\n"
+                    f"Data: {json.dumps(chunk, default=convert_to_serializable)}"
+                )
+            })
+
+            try:
+                response = openai.ChatCompletion.create(
+                    model="gpt-4o-mini",
+                    messages=temp_messages,
+                    max_tokens=8000,
+                    temperature=0.7,
+                    n=1,
+                )
+                # Clean the response before appending
+                chunk_response = response.choices[0].message['content'].strip()
+                final_response_parts.append(chunk_response)
+                logging.debug("Received response for chunk %d", idx + 1)
+
+            except Exception as e:
+                logging.error("Error generating GPT response: %s", e)
+                return None
+
+        logging.info("Successfully generated final response using data")
+        return "\n".join(final_response_parts)
+
+    else:
+        # No new data; generate response based on previous context
+        temp_messages = messages_to_use.copy()
+        temp_messages.append({
+            "role": "user",
+            "content": f"{prompt}"
+        })
+        logging.debug("No new data available; generating response based on the prompt")
+
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=temp_messages,
+                max_tokens=8000,
+                temperature=0.7,
+                n=1,
+            )
+            logging.info("Successfully generated final response without new data")
+            final_response = response.choices[0].message['content'].strip()
+            return final_response
+
+        except Exception as e:
+            logging.error("Error generating GPT response: %s", e)
+            return None
+
+if _name_ == "_main_":
     app.run(debug=True)
