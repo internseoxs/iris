@@ -20,6 +20,7 @@ body {
     display: flex;
     flex-direction: column;
     transition: background-color 0.3s, color 0.3s;
+
 }
 .loading-message {
             font-style: italic;
@@ -46,11 +47,13 @@ header {
     padding: 10px 0;
     text-align: center;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+
 }
 
 header h1 {
     font-size: 1.5rem;
     letter-spacing: 1px;
+
 }
 
 .main-container {
@@ -59,6 +62,7 @@ header h1 {
     max-width: 1200px;
     margin: 0 auto;
     width: 100%;
+
 }
 
 .chat-history {
@@ -348,12 +352,56 @@ h2 {
 
         let chatHistory = [];
         let currentChatIndex = null;
+        let recognizing = false;
+        let recognition;
+        let loadingInterval;
+
+        const loadingMessages = [
+            "Generating response...",
+            "Just a moment...",
+            "Thinking...",
+            "Processing your request...",
+            "Hang tight..."
+        ];
 
         document.addEventListener("DOMContentLoaded", () => {
             // Clear chat history on page load
             chatHistory = [];
             currentChatIndex = null;
+
+            // Check if browser supports Web Speech API
+            if (!('webkitSpeechRecognition' in window)) {
+                alert("Speech recognition is not supported by this browser.");
+            } else {
+                recognition = new webkitSpeechRecognition();
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
+
+                recognition.onstart = function() {
+                    recognizing = true;
+                    document.getElementById('micButton').classList.add('active');
+                };
+
+                recognition.onend = function() {
+                    recognizing = false;
+                    document.getElementById('micButton').classList.remove('active');
+                };
+
+                recognition.onresult = function(event) {
+                    const transcript = event.results[0][0].transcript;
+                    document.getElementById('prompt').value += transcript.trim();
+                };
+            }
         });
+
+        function startRecognition() {
+            if (recognizing) {
+                recognition.stop();
+                return;
+            }
+            recognition.start();
+        }
 
         function renderChatList() {
             const chatListContainer = document.querySelector('.chat-history');
@@ -417,10 +465,6 @@ h2 {
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        // ... (rest of your existing JavaScript code remains unchanged)
-
-
-
         function editPrompt(chatIndex, messageIndex) {
             const prompt = chatHistory[chatIndex].messages[messageIndex].content;
             document.getElementById('prompt').value = prompt; // Load message content into the input field
@@ -433,14 +477,37 @@ h2 {
             window.currentEditMessageIndex = messageIndex;
         }
 
+        function showLoadingMessage() {
+            const chatContainer = document.getElementById('chat-container');
+            const loadingMessageElement = document.createElement('div');
+            loadingMessageElement.classList.add('loading-message');
+            loadingMessageElement.innerText = loadingMessages[0];
+            chatContainer.appendChild(loadingMessageElement);
+
+            let messageIndex = 0;
+            loadingInterval = setInterval(() => {
+                messageIndex = (messageIndex + 1) % loadingMessages.length;
+                loadingMessageElement.innerText = loadingMessages[messageIndex];
+            }, 1000);
+        }
+
+        function hideLoadingMessage() {
+            const chatContainer = document.getElementById('chat-container');
+            const loadingMessageElement = chatContainer.querySelector('.loading-message');
+            if (loadingMessageElement) {
+                chatContainer.removeChild(loadingMessageElement);
+            }
+            clearInterval(loadingInterval);
+        }
+
         function saveEditedPrompt() {
             const newPrompt = document.getElementById('prompt').value.trim();
-            const spinner = document.getElementById('loading-spinner');
 
             if (!newPrompt) return;
 
-            // Show loading spinner
-            spinner.style.display = 'block';
+            // Show loading message
+            showLoadingMessage();
+
             // Clear input
             document.getElementById('prompt').value = '';
 
@@ -458,8 +525,8 @@ h2 {
             })
             .then(response => response.json())
             .then(data => {
-                // Hide loading spinner
-                spinner.style.display = 'none';
+                // Hide loading message
+                hideLoadingMessage();
 
                 if (!data.error) {
                     // Update the local chat history and re-render
@@ -482,8 +549,8 @@ h2 {
             })
             .catch(error => {
                 console.error('Error updating prompt:', error);
-                // Hide loading spinner
-                spinner.style.display = 'none';
+                // Hide loading message
+                hideLoadingMessage();
             });
         }
 
@@ -510,12 +577,12 @@ h2 {
 
         function sendPrompt() {
             const prompt = document.getElementById('prompt').value.trim();
-            const spinner = document.getElementById('loading-spinner');
 
             if (!prompt) return;
 
-            // Show loading spinner
-            spinner.style.display = 'block';
+            // Show loading message
+            showLoadingMessage();
+
             document.getElementById('prompt').value = '';
 
             fetch('/generate-response', {
@@ -527,8 +594,8 @@ h2 {
             })
             .then(response => response.json())
             .then(data => {
-                // Hide loading spinner
-                spinner.style.display = 'none';
+                // Hide loading message
+                hideLoadingMessage();
 
                 // Add to chat history
                 if (currentChatIndex !== null && currentChatIndex < chatHistory.length) {
@@ -550,8 +617,8 @@ h2 {
             })
             .catch(error => {
                 console.error('Error:', error);
-                // Hide loading spinner
-                spinner.style.display = 'none';
+                // Hide loading message
+                hideLoadingMessage();
                 alert('An error occurred while processing your request.');
             });
         }
@@ -601,10 +668,12 @@ h2 {
 
             <div class="input-container">
                 <textarea id="prompt" rows="3" placeholder="Type your message..."></textarea>
-                <button onclick="sendPrompt()" id="sendButton">Send</button>
-                <button onclick="saveEditedPrompt()" id="saveEditButton" style="display: none;">Save Edit</button>
-                <button onclick="cancelEdit()" id="cancelEditButton" style="display: none;">Cancel Edit</button>
-                <button class="new-chat-button" onclick="newChat()">New Chat</button>
+                <button onclick="sendPrompt()" id="sendButton">Send ↩ </button>
+                <button onclick="saveEditedPrompt()" id="saveEditButton" style="display: none;">Save Edit 💾 </button>
+                <button onclick="cancelEdit()" id="cancelEditButton" style="display: none;">Cancel Edit ✖ </button>
+                <button class="new-chat-button" onclick="newChat()">New ✒️ </button>
+                <!-- Voice recognition button -->
+                <button class="mic-button" id="micButton" onclick="startRecognition()">Speak 🎤</button>
             </div>
 
             <div class="toggle-container">
@@ -615,7 +684,5 @@ h2 {
             </div>
         </div>
     </div>
-
-    <div id="loading-spinner" class="loading-spinner"></div>
 </body>
 </html>
