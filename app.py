@@ -125,15 +125,19 @@ def format_schema_for_gpt(schema):
         formatted_schema += f"Table: {table}\nColumns: {', '.join(columns)}\n\n"
     return formatted_schema
 
-def get_serializable_messages(messages):
-    """Extracts 'role' and 'content' from messages, ensures 'content' is serializable."""
+def get_serializable_messages(messages, max_content_length=1000):
+    """Extracts 'role' and 'content' from messages, ensuring content is serializable and within size limits."""
     serializable_messages = []
     for msg in messages:
-        serializable_msg = {
+        content = msg["content"]
+        # Exclude messages with non-serializable content or large content
+        if len(content) > max_content_length:
+            logging.debug(f"Skipping message with large content from role {msg['role']}")
+            continue  # Skip messages with large content
+        serializable_messages.append({
             "role": msg["role"],
-            "content": msg["content"]
-        }
-        serializable_messages.append(serializable_msg)
+            "content": content
+        })
     return serializable_messages
 
 @app.route('/edit-prompt', methods=['POST'])
@@ -394,11 +398,11 @@ def process_data_and_generate_response(chat_session, prompt, formatted_schema, m
                 # Do not include 'sql_query' and 'data' in messages passed to OpenAI API
                 messages.append({
                     "role": "assistant",
-                    "content": f"Data Retrieved."
+                    "content": f"Data Retrieved.",
+                    # Store 'sql_query' and 'data' separately, but they won't be included in messages_to_use
+                    "sql_query": sql_query,
+                    "data": new_data
                 })
-                # Store 'sql_query' and 'data' separately in the message, but these won't be sent to OpenAI API
-                messages[-1]['sql_query'] = sql_query
-                messages[-1]['data'] = new_data
                 logging.debug("Data retrieved and added to conversation history")
                 break
             else:
@@ -559,19 +563,14 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
         "Database Schema:\n" + schema
     )
 
-    if previous_sql_query and previous_data:
-        # Include previous query and a sample of previous data
-        sample_data = previous_data[:5] if len(previous_data) > 5 else previous_data
-        system_prompt += (
-            "\n\nPrevious SQL Query:\n" + previous_sql_query +
-            "\n\nPrevious Data (first few rows):\n" + json.dumps(sample_data, default=convert_to_serializable)
-        )
+    # Note: Avoid including previous_data in the system prompt to prevent serialization issues
 
     messages_to_use = [{"role": "system", "content": system_prompt}]
 
-    # Include the last few messages from the conversation history for context
+    # Include the last few user messages for context
     if messages:
-        messages_to_use += get_serializable_messages(messages[-4:])
+        user_messages = [msg for msg in messages[-4:] if msg['role'] == 'user']
+        messages_to_use += get_serializable_messages(user_messages)
 
     # Append the user's prompt
     messages_to_use.append({
@@ -614,19 +613,14 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
         "\n\nDatabase Schema:\n" + schema
     )
 
-    if previous_sql_query and previous_data:
-        # Include previous query and a sample of previous data
-        sample_data = previous_data[:5] if len(previous_data) > 5 else previous_data
-        system_prompt += (
-            "\n\nPrevious SQL Query:\n" + previous_sql_query +
-            "\n\nPrevious Data (first few rows):\n" + json.dumps(sample_data, default=convert_to_serializable)
-        )
+    # Note: Avoid including previous_data in the system prompt to prevent serialization issues
 
     messages_to_use = [{"role": "system", "content": system_prompt}]
 
-    # Include the last few messages from the conversation history for context
+    # Include the last few user messages for context
     if messages:
-        messages_to_use += get_serializable_messages(messages[-4:])
+        user_messages = [msg for msg in messages[-4:] if msg['role'] == 'user']
+        messages_to_use += get_serializable_messages(user_messages)
 
     try:
         # Call GPT to generate the corrected SQL query
@@ -712,9 +706,10 @@ def generate_final_response(prompt, db_data, messages=None):
          "content": "You are a data analyst assistant who provides detailed answers and insights based on the user's prompt and provided data. Use your analytical skills to interpret the data and provide actionable recommendations."}
     ]
 
-    # Include the conversation history for context
+    # Include only user messages for context
     if messages:
-        messages_to_use += get_serializable_messages(messages[-6:])  # Include the last few messages
+        user_messages = [msg for msg in messages[-6:] if msg['role'] == 'user']
+        messages_to_use += get_serializable_messages(user_messages)
 
     if db_data:
         # Process database data without chunking
