@@ -332,7 +332,7 @@ def clarify_prompt(prompt, messages):
     try:
         # Call GPT to determine if clarification is needed
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[system_message] + recent_messages,
             max_tokens=50,
             temperature=0.0,
@@ -594,7 +594,7 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
     try:
         # Call GPT to generate the SQL query
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=messages_to_use,
             max_tokens=500,
             temperature=0.0,
@@ -643,7 +643,7 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
     try:
         # Call GPT to generate the corrected SQL query
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=messages_to_use,
             max_tokens=500,
             temperature=0.0,
@@ -745,7 +745,7 @@ def generate_final_response(prompt, db_data, messages=None):
 
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=temp_messages,
                 max_tokens=2000,
                 temperature=0.0,
@@ -770,7 +770,7 @@ def generate_final_response(prompt, db_data, messages=None):
 
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=temp_messages,
                 max_tokens=2000,
                 temperature=0.0,
@@ -848,7 +848,7 @@ def requires_more_data(prompt, messages=None):
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=messages_to_use,
             max_tokens=5,  # Reduced to get concise 'yes' or 'no'
             temperature=0.0,
@@ -889,7 +889,7 @@ def is_related_to_previous_prompt(new_prompt, previous_prompts):
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=messages_to_use,
             max_tokens=5,  # Reduced to get concise 'yes' or 'no'
             temperature=0.0,
