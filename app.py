@@ -38,7 +38,12 @@ sabre_db_config = {
     'port': os.environ.get('SABRE_DB_PORT'),
     'dbname': os.environ.get('SABRE_DB_NAME'),
     'user': os.environ.get('SABRE_DB_USER'),
-    'password': os.environ.get('SABRE_DB_PASSWORD')
+    'password': os.environ.get('SABRE_DB_PASSWORD'),
+    'sslmode': os.environ.get('SABRE_DB_SSLMODE', 'prefer'),
+    'sslrootcert': os.environ.get('SABRE_DB_SSLROOTCERT'),
+    'sslcert': os.environ.get('SABRE_DB_SSLCERT'),
+    'sslkey': os.environ.get('SABRE_DB_SSLKEY'),
+    'sslcrl': os.environ.get('SABRE_DB_SSLCRL'),
 }
 
 chat_history_db_config = {
@@ -46,47 +51,54 @@ chat_history_db_config = {
     'port': os.environ.get('CHAT_HISTORY_DB_PORT'),
     'dbname': os.environ.get('CHAT_HISTORY_DB_NAME'),
     'user': os.environ.get('CHAT_HISTORY_DB_USER'),
-    'password': os.environ.get('CHAT_HISTORY_DB_PASSWORD')
+    'password': os.environ.get('CHAT_HISTORY_DB_PASSWORD'),
+    'sslmode': os.environ.get('CHAT_HISTORY_DB_SSLMODE', 'prefer'),
+    'sslrootcert': os.environ.get('CHAT_HISTORY_DB_SSLROOTCERT'),
+    'sslcert': os.environ.get('CHAT_HISTORY_DB_SSLCERT'),
+    'sslkey': os.environ.get('CHAT_HISTORY_DB_SSLKEY'),
+    'sslcrl': os.environ.get('CHAT_HISTORY_DB_SSLCRL'),
 }
 
 # Check if all necessary keys are present for Sabre DB
-missing_sabre_vars = [key for key, value in sabre_db_config.items() if not value]
+required_sabre_vars = ['host', 'port', 'dbname', 'user', 'password']
+missing_sabre_vars = [key for key in required_sabre_vars if not sabre_db_config.get(key)]
 if missing_sabre_vars:
     logging.error(f"Missing configuration values for Sabre DB1: {', '.join(missing_sabre_vars)}")
     raise ValueError(f"Missing configuration values for Sabre DB1: {', '.join(missing_sabre_vars)}")
 
 # Check if all necessary keys are present for Chat History DB
-missing_chat_history_vars = [key for key, value in chat_history_db_config.items() if not value]
+required_chat_history_vars = ['host', 'port', 'dbname', 'user', 'password']
+missing_chat_history_vars = [key for key in required_chat_history_vars if not chat_history_db_config.get(key)]
 if missing_chat_history_vars:
     logging.error(f"Missing configuration values for Chat History DB: {', '.join(missing_chat_history_vars)}")
     raise ValueError(f"Missing configuration values for Chat History DB: {', '.join(missing_chat_history_vars)}")
 
-# Create connection pools for both databases
-try:
-    sabre_db_pool = psycopg2.pool.SimpleConnectionPool(
-        1,   # Minimum number of connections
-        20,  # Maximum number of connections
-        host=sabre_db_config['host'],
-        port=sabre_db_config['port'],
-        dbname=sabre_db_config['dbname'],
-        user=sabre_db_config['user'],
-        password=sabre_db_config['password']
-    )
-    logging.info("sabre_db1 connection pool created successfully")
+# Function to create a database connection pool with SSL support
+def create_db_pool(db_config, db_name):
+    try:
+        pool = psycopg2.pool.SimpleConnectionPool(
+            1,   # Minimum number of connections
+            20,  # Maximum number of connections
+            host=db_config['host'],
+            port=db_config['port'],
+            dbname=db_config['dbname'],
+            user=db_config['user'],
+            password=db_config['password'],
+            sslmode=db_config.get('sslmode', 'prefer'),
+            sslrootcert=db_config.get('sslrootcert'),
+            sslcert=db_config.get('sslcert'),
+            sslkey=db_config.get('sslkey'),
+            sslcrl=db_config.get('sslcrl'),
+        )
+        logging.info(f"{db_name} connection pool created successfully")
+        return pool
+    except Exception as e:
+        logging.error(f"Error creating database connection pool for {db_name}: {e}")
+        raise
 
-    chat_history_pool = psycopg2.pool.SimpleConnectionPool(
-        1,   # Minimum number of connections
-        20,  # Maximum number of connections
-        host=chat_history_db_config['host'],
-        port=chat_history_db_config['port'],
-        dbname=chat_history_db_config['dbname'],
-        user=chat_history_db_config['user'],
-        password=chat_history_db_config['password']
-    )
-    logging.info("chat_history connection pool created successfully")
-except Exception as e:
-    logging.error("Error creating database connection pools: %s", e)
-    raise
+# Create connection pools for both databases
+sabre_db_pool = create_db_pool(sabre_db_config, 'sabre_db1')
+chat_history_pool = create_db_pool(chat_history_db_config, 'chat_history')
 
 def get_database_schema():
     """Retrieve table and column names from the sabre_db1 PostgreSQL database."""
@@ -211,7 +223,7 @@ def is_incomplete_prompt(prompt):
 @app.route("/", methods=["GET"])
 def index():
     logging.info("Rendering index page")
-    return render_template("index.html")
+    return render_template("test.html")
 
 @app.route("/chat-history", methods=["GET"])
 def chat_history_route():
@@ -320,7 +332,7 @@ def clarify_prompt(prompt, messages):
     try:
         # Call GPT to determine if clarification is needed
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=[system_message] + recent_messages,
             max_tokens=50,
             temperature=0.0,
@@ -551,9 +563,9 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
     # Create the base system message with instructions and schema
     system_prompt = (
         "As a SQL expert, generate a safe, read-only SQL query based on the user's prompt and the provided database schema. "
-        "generate correct syntax of query and only return sql query in response"
+        "Generate correct syntax of query and only return SQL query in response. "
         "Determine what data is needed to answer the prompt. The query should fetch necessary data for analysis. "
-        "Generate query in this way that if some names column are present in that table then they are must extracted. "
+        "Generate query in such a way that if some name columns are present in that table, then they must be extracted. "
         "If the effective date is greater than the ship date, then orders are late; if the effective date is less than or equal to the ship date, then it's on time. "
         "Ensure the query is syntactically correct and optimized. Do not ask for clarification.\n\n"
         "Database Schema:\n" + schema
@@ -582,7 +594,7 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
     try:
         # Call GPT to generate the SQL query
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=messages_to_use,
             max_tokens=500,
             temperature=0.0,
@@ -631,7 +643,7 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
     try:
         # Call GPT to generate the corrected SQL query
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=messages_to_use,
             max_tokens=500,
             temperature=0.0,
@@ -733,9 +745,9 @@ def generate_final_response(prompt, db_data, messages=None):
 
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4o-mini",
+                model="gpt-4",
                 messages=temp_messages,
-                max_tokens=8000,
+                max_tokens=2000,
                 temperature=0.0,
                 n=1,
             )
@@ -758,9 +770,9 @@ def generate_final_response(prompt, db_data, messages=None):
 
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4o-mini",
+                model="gpt-4",
                 messages=temp_messages,
-                max_tokens=8000,
+                max_tokens=2000,
                 temperature=0.0,
                 n=1,
             )
@@ -836,7 +848,7 @@ def requires_more_data(prompt, messages=None):
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=messages_to_use,
             max_tokens=5,  # Reduced to get concise 'yes' or 'no'
             temperature=0.0,
@@ -877,7 +889,7 @@ def is_related_to_previous_prompt(new_prompt, previous_prompts):
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=messages_to_use,
             max_tokens=5,  # Reduced to get concise 'yes' or 'no'
             temperature=0.0,
