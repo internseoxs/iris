@@ -10,7 +10,6 @@ from datetime import datetime, date
 import logging
 import os
 import uuid  # For generating unique chat IDs
-from dotenv import load_dotenv  # Import load_dotenv
 
 app = Flask(__name__)  # Fixed Flask app initialization
 
@@ -20,47 +19,44 @@ conversation_history = []
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Load environment variables from .env file
-load_dotenv()
-
-# Set OpenAI API key from environment variable
-openai_api_key = os.environ.get('OPENAI_API_KEY')
+# Set OpenAI API key from environment variables
+openai_api_key = os.getenv('OPENAI_API_KEY')
 if not openai_api_key:
     logging.error('OpenAI API key is missing in the environment variables')
     raise ValueError('OpenAI API key is missing in the environment variables')
 openai.api_key = openai_api_key
 
 # Secret key for Flask (can be used for sessions, etc.)
-app.secret_key = os.environ.get('SECRET_KEY')
+app.secret_key = os.getenv('SECRET_KEY')
 
 # Database connection parameters from environment variables
 sabre_db_config = {
-    'host': os.environ.get('SABRE_DB_HOST'),
-    'port': os.environ.get('SABRE_DB_PORT'),
-    'dbname': os.environ.get('SABRE_DB_NAME'),
-    'user': os.environ.get('SABRE_DB_USER'),
-    'password': os.environ.get('SABRE_DB_PASSWORD')
+    'host': os.getenv('SABRE_DB1_HOST'),
+    'port': os.getenv('SABRE_DB1_PORT'),
+    'dbname': os.getenv('SABRE_DB1_DBNAME'),
+    'user': os.getenv('SABRE_DB1_USER'),
+    'password': os.getenv('SABRE_DB1_PASSWORD')
 }
 
 chat_history_db_config = {
-    'host': os.environ.get('CHAT_HISTORY_DB_HOST'),
-    'port': os.environ.get('CHAT_HISTORY_DB_PORT'),
-    'dbname': os.environ.get('CHAT_HISTORY_DB_NAME'),
-    'user': os.environ.get('CHAT_HISTORY_DB_USER'),
-    'password': os.environ.get('CHAT_HISTORY_DB_PASSWORD')
+    'host': os.getenv('CHAT_HISTORY_HOST'),
+    'port': os.getenv('CHAT_HISTORY_PORT'),
+    'dbname': os.getenv('CHAT_HISTORY_DBNAME'),
+    'user': os.getenv('CHAT_HISTORY_USER'),
+    'password': os.getenv('CHAT_HISTORY_PASSWORD')
 }
 
 # Check if all necessary keys are present in the environment variables for Sabre DB
 missing_sabre_vars = [key for key, value in sabre_db_config.items() if not value]
 if missing_sabre_vars:
-    logging.error(f"Missing environment variables for Sabre DB1: {', '.join(missing_sabre_vars)}")
-    raise ValueError(f"Missing environment variables for Sabre DB1: {', '.join(missing_sabre_vars)}")
+    logging.error(f"Missing environment variables for Sabre DB1: {', '.join('SABRE_DB1_' + key.upper() for key in missing_sabre_vars)}")
+    raise ValueError(f"Missing environment variables for Sabre DB1: {', '.join('SABRE_DB1_' + key.upper() for key in missing_sabre_vars)}")
 
 # Check if all necessary keys are present in the environment variables for Chat History DB
 missing_chat_history_vars = [key for key, value in chat_history_db_config.items() if not value]
 if missing_chat_history_vars:
-    logging.error(f"Missing environment variables for Chat History DB: {', '.join(missing_chat_history_vars)}")
-    raise ValueError(f"Missing environment variables for Chat History DB: {', '.join(missing_chat_history_vars)}")
+    logging.error(f"Missing environment variables for Chat History DB: {', '.join('CHAT_HISTORY_' + key.upper() for key in missing_chat_history_vars)}")
+    raise ValueError(f"Missing environment variables for Chat History DB: {', '.join('CHAT_HISTORY_' + key.upper() for key in missing_chat_history_vars)}")
 
 # Create connection pools for both databases
 try:
@@ -68,7 +64,7 @@ try:
         1,   # Minimum number of connections
         20,  # Maximum number of connections
         host=sabre_db_config['host'],
-        port=sabre_db_config['port'],
+        port=int(sabre_db_config['port']),
         dbname=sabre_db_config['dbname'],
         user=sabre_db_config['user'],
         password=sabre_db_config['password']
@@ -79,7 +75,7 @@ try:
         1,   # Minimum number of connections
         20,  # Maximum number of connections
         host=chat_history_db_config['host'],
-        port=chat_history_db_config['port'],
+        port=int(chat_history_db_config['port']),
         dbname=chat_history_db_config['dbname'],
         user=chat_history_db_config['user'],
         password=chat_history_db_config['password']
@@ -125,19 +121,15 @@ def format_schema_for_gpt(schema):
         formatted_schema += f"Table: {table}\nColumns: {', '.join(columns)}\n\n"
     return formatted_schema
 
-def get_serializable_messages(messages, max_content_length=1000):
-    """Extracts 'role' and 'content' from messages, ensuring content is serializable and within size limits."""
+def get_serializable_messages(messages):
+    """Extracts 'role' and 'content' from messages, ensures 'content' is serializable."""
     serializable_messages = []
     for msg in messages:
-        content = msg["content"]
-        # Exclude messages with non-serializable content or large content
-        if len(content) > max_content_length:
-            logging.debug(f"Skipping message with large content from role {msg['role']}")
-            continue  # Skip messages with large content
-        serializable_messages.append({
+        serializable_msg = {
             "role": msg["role"],
-            "content": content
-        })
+            "content": msg["content"]
+        }
+        serializable_messages.append(serializable_msg)
     return serializable_messages
 
 @app.route('/edit-prompt', methods=['POST'])
@@ -398,11 +390,11 @@ def process_data_and_generate_response(chat_session, prompt, formatted_schema, m
                 # Do not include 'sql_query' and 'data' in messages passed to OpenAI API
                 messages.append({
                     "role": "assistant",
-                    "content": f"Data Retrieved.",
-                    # Store 'sql_query' and 'data' separately, but they won't be included in messages_to_use
-                    "sql_query": sql_query,
-                    "data": new_data
+                    "content": f"Data Retrieved."
                 })
+                # Store 'sql_query' and 'data' separately in the message, but these won't be sent to OpenAI API
+                messages[-1]['sql_query'] = sql_query
+                messages[-1]['data'] = new_data
                 logging.debug("Data retrieved and added to conversation history")
                 break
             else:
@@ -556,6 +548,7 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
     # Create the base system message with instructions and schema
     system_prompt = (
         "As a SQL expert, generate a safe, read-only SQL query based on the user's prompt and the provided database schema. "
+        "generate correct syntax of query and only return sql query in response"
         "Determine what data is needed to answer the prompt. The query should fetch necessary data for analysis. "
         "Generate query in this way that if some names column are present in that table then they are must extracted. "
         "If the effective date is greater than the ship date, then orders are late; if the effective date is less than or equal to the ship date, then it's on time. "
@@ -563,14 +556,19 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
         "Database Schema:\n" + schema
     )
 
-    # Note: Avoid including previous_data in the system prompt to prevent serialization issues
+    if previous_sql_query and previous_data:
+        # Include previous query and a sample of previous data
+        sample_data = previous_data[:5] if len(previous_data) > 5 else previous_data
+        system_prompt += (
+            "\n\nPrevious SQL Query:\n" + previous_sql_query +
+            "\n\nPrevious Data (first few rows):\n" + json.dumps(sample_data, default=convert_to_serializable)
+        )
 
     messages_to_use = [{"role": "system", "content": system_prompt}]
 
-    # Include the last few user messages for context
+    # Include the last few messages from the conversation history for context
     if messages:
-        user_messages = [msg for msg in messages[-4:] if msg['role'] == 'user']
-        messages_to_use += get_serializable_messages(user_messages)
+        messages_to_use += get_serializable_messages(messages[-4:])
 
     # Append the user's prompt
     messages_to_use.append({
@@ -613,14 +611,19 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
         "\n\nDatabase Schema:\n" + schema
     )
 
-    # Note: Avoid including previous_data in the system prompt to prevent serialization issues
+    if previous_sql_query and previous_data:
+        # Include previous query and a sample of previous data
+        sample_data = previous_data[:5] if len(previous_data) > 5 else previous_data
+        system_prompt += (
+            "\n\nPrevious SQL Query:\n" + previous_sql_query +
+            "\n\nPrevious Data (first few rows):\n" + json.dumps(sample_data, default=convert_to_serializable)
+        )
 
     messages_to_use = [{"role": "system", "content": system_prompt}]
 
-    # Include the last few user messages for context
+    # Include the last few messages from the conversation history for context
     if messages:
-        user_messages = [msg for msg in messages[-4:] if msg['role'] == 'user']
-        messages_to_use += get_serializable_messages(user_messages)
+        messages_to_use += get_serializable_messages(messages[-4:])
 
     try:
         # Call GPT to generate the corrected SQL query
@@ -706,10 +709,9 @@ def generate_final_response(prompt, db_data, messages=None):
          "content": "You are a data analyst assistant who provides detailed answers and insights based on the user's prompt and provided data. Use your analytical skills to interpret the data and provide actionable recommendations."}
     ]
 
-    # Include only user messages for context
+    # Include the conversation history for context
     if messages:
-        user_messages = [msg for msg in messages[-6:] if msg['role'] == 'user']
-        messages_to_use += get_serializable_messages(user_messages)
+        messages_to_use += get_serializable_messages(messages[-6:])  # Include the last few messages
 
     if db_data:
         # Process database data without chunking
