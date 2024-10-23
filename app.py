@@ -548,9 +548,9 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
     # Create the base system message with instructions and schema
     system_prompt = (
         "As a SQL expert, generate a safe, read-only SQL query based on the user's prompt and the provided database schema. "
-        "generate correct syntax of query and only return sql query in response"
+        "Generate correct syntax of query and only return the SQL query in the response. "
         "Determine what data is needed to answer the prompt. The query should fetch necessary data for analysis. "
-        "Generate query in this way that if some names column are present in that table then they are must extracted. "
+        "Generate the query in such a way that if some names columns are present in that table then they are must be extracted. "
         "If the effective date is greater than the ship date, then orders are late; if the effective date is less than or equal to the ship date, then it's on time. "
         "Ensure the query is syntactically correct and optimized. Do not ask for clarification.\n\n"
         "Database Schema:\n" + schema
@@ -698,12 +698,64 @@ def convert_to_serializable(obj):
     else:
         return obj
 
+def chunk_data(db_data_serializable, max_size):
+    """
+    Splits the data into chunks that are less than or equal to max_size bytes when serialized.
+    """
+    chunks = []
+    current_chunk = []
+    current_size = 0
+
+    for row in db_data_serializable:
+        row_json = json.dumps(row, default=convert_to_serializable)
+        row_size = len(row_json.encode('utf-8'))
+
+        if current_size + row_size > max_size and current_chunk:
+            chunks.append(current_chunk)
+            current_chunk = [row]
+            current_size = row_size
+        else:
+            current_chunk.append(row)
+            current_size += row_size
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
+def process_chunk(chunk, prompt, messages_to_use):
+    """
+    Processes a single chunk of data and returns the assistant's response.
+    """
+    data_json = json.dumps(chunk, default=convert_to_serializable)
+    data_prompt = f"Based on the following data, {prompt}\nData: {data_json}"
+
+    temp_messages = messages_to_use.copy()
+    temp_messages.append({
+        "role": "user",
+        "content": data_prompt
+    })
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=temp_messages,
+            max_tokens=2000,  # Adjust max_tokens as needed
+            temperature=0.0,
+            n=1,
+        )
+        chunk_response = response.choices[0].message['content'].strip()
+        logging.info("Successfully processed a data chunk")
+        return chunk_response
+    except Exception as e:
+        logging.error("Error processing data chunk: %s", e)
+        return None
+
 def generate_final_response(prompt, db_data, messages=None):
     """
-    Generate the final response by passing the prompt and data to GPT.
-    If no data is available from the database, GPT will answer directly.
+    Generate the final response by processing data in chunks and aggregating the results.
     """
-    logging.debug("Generating final response")
+    logging.debug("Generating final response with data chunking")
     messages_to_use = [
         {"role": "system",
          "content": "You are a data analyst assistant who provides detailed answers and insights based on the user's prompt and provided data. Use your analytical skills to interpret the data and provide actionable recommendations."}
@@ -714,34 +766,52 @@ def generate_final_response(prompt, db_data, messages=None):
         messages_to_use += get_serializable_messages(messages[-6:])  # Include the last few messages
 
     if db_data:
-        # Process database data without chunking
+        # Process database data with chunking
         db_data_serializable = convert_to_serializable(db_data)
         logging.debug("Data has been serialized")
 
-        # Send the entire data to GPT
+        # Define the maximum size for each chunk
+        MAX_CONTENT_SIZE = 950000  # Max content size in bytes (less than 1MB limit)
+        CHUNK_MAX_SIZE = 800000    # Leave room for other message content
+
+        # Split the data into chunks
+        chunks = chunk_data(db_data_serializable, CHUNK_MAX_SIZE)
+        logging.info(f"Data has been split into {len(chunks)} chunks")
+
+        # Process each chunk and collect responses
+        chunk_responses = []
+        for idx, chunk in enumerate(chunks):
+            logging.info(f"Processing chunk {idx + 1}/{len(chunks)}")
+            chunk_response = process_chunk(chunk, prompt, messages_to_use)
+            if chunk_response is None:
+                logging.error(f"Failed to process chunk {idx + 1}")
+                return None
+            chunk_responses.append(chunk_response)
+
+        # Combine chunk responses
+        combined_response_content = "\n".join(chunk_responses)
+
+        # Optionally, make a final API call to summarize or further analyze the combined responses
+        final_prompt = f"Based on the analysis of the data chunks, {prompt}"
         temp_messages = messages_to_use.copy()
         temp_messages.append({
             "role": "user",
-            "content": (
-                f"Based on the following data, {prompt}\n"
-                f"Data: {json.dumps(db_data_serializable, default=convert_to_serializable)}"
-            )
+            "content": combined_response_content + "\n\n" + final_prompt
         })
 
         try:
             response = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 messages=temp_messages,
-                max_tokens=8000,
+                max_tokens=2000,  # Adjust max_tokens as needed
                 temperature=0.0,
                 n=1,
             )
             final_response = response.choices[0].message['content'].strip()
-            logging.info("Successfully generated final response using data")
+            logging.info("Successfully generated final response using chunked data")
             return final_response
-
         except Exception as e:
-            logging.error("Error generating GPT response: %s", e)
+            logging.error("Error generating final response: %s", e)
             return None
 
     else:
@@ -757,7 +827,7 @@ def generate_final_response(prompt, db_data, messages=None):
             response = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 messages=temp_messages,
-                max_tokens=8000,
+                max_tokens=2000,  # Adjust max_tokens as needed
                 temperature=0.0,
                 n=1,
             )
