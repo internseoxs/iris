@@ -317,7 +317,7 @@ def clarify_prompt(prompt, messages):
     try:
         # Call GPT to determine if clarification is needed
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=[system_message] + recent_messages,
             max_tokens=50,
             temperature=0.0,
@@ -503,31 +503,49 @@ def extract_tables_and_columns(sql_query):
 
     try:
         parsed = sqlparse.parse(sql_query)
+        if not parsed:
+            return tables, columns
         stmt = parsed[0]
 
-        select_seen = False
+        # Flags to identify when we're in the SELECT and FROM clauses
+        in_select = False
+        in_from = False
 
         for token in stmt.tokens:
             if token.ttype is sqlparse.tokens.DML and token.value.upper() == 'SELECT':
-                select_seen = True
-            if select_seen and isinstance(token, sqlparse.sql.IdentifierList):
-                for identifier in token.get_identifiers():
-                    if isinstance(identifier, sqlparse.sql.Identifier):
-                        # Handle aliases
-                        if identifier.get_real_name():
+                in_select = True
+                continue
+            if in_select:
+                if isinstance(token, sqlparse.sql.IdentifierList):
+                    for identifier in token.get_identifiers():
+                        if isinstance(identifier, sqlparse.sql.Identifier):
+                            real_name = identifier.get_real_name()
                             parent_name = identifier.get_parent_name()
                             if parent_name:
-                                columns.setdefault(parent_name, []).append(identifier.get_real_name())
+                                columns.setdefault(parent_name, []).append(real_name)
                             else:
-                                # Handle cases without table aliases
-                                columns.setdefault('unknown_table', []).append(identifier.get_real_name())
-            if isinstance(token, sqlparse.sql.From):
-                for identifier in token.get_sublists():
-                    if isinstance(identifier, sqlparse.sql.IdentifierList):
-                        for id in identifier.get_identifiers():
-                            tables.append(id.get_real_name())
-                    elif isinstance(identifier, sqlparse.sql.Identifier):
-                        tables.append(identifier.get_real_name())
+                                columns.setdefault('unknown_table', []).append(real_name)
+                elif isinstance(token, sqlparse.sql.Identifier):
+                    real_name = token.get_real_name()
+                    parent_name = token.get_parent_name()
+                    if parent_name:
+                        columns.setdefault(parent_name, []).append(real_name)
+                    else:
+                        columns.setdefault('unknown_table', []).append(real_name)
+                elif token.ttype is sqlparse.tokens.Keyword and token.value.upper() == 'FROM':
+                    in_select = False
+                    in_from = True
+                    continue
+            if in_from:
+                if isinstance(token, sqlparse.sql.IdentifierList):
+                    for identifier in token.get_identifiers():
+                        if isinstance(identifier, sqlparse.sql.Identifier):
+                            tables.append(identifier.get_real_name())
+                elif isinstance(token, sqlparse.sql.Identifier):
+                    tables.append(token.get_real_name())
+                elif token.ttype is sqlparse.tokens.Keyword:
+                    # Reached end of FROM clause
+                    in_from = False
         return tables, columns
     except Exception as e:
         logging.error("Error extracting tables and columns: %s", e)
@@ -579,7 +597,7 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
     try:
         # Call GPT to generate the SQL query
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=messages_to_use,
             max_tokens=500,
             temperature=0.0,
@@ -628,7 +646,7 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
     try:
         # Call GPT to generate the corrected SQL query
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=messages_to_use,
             max_tokens=500,
             temperature=0.0,
@@ -738,7 +756,7 @@ def process_chunk(chunk, prompt, messages_to_use):
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=temp_messages,
             max_tokens=2000,  # Adjust max_tokens as needed
             temperature=0.0,
@@ -801,7 +819,7 @@ def generate_final_response(prompt, db_data, messages=None):
 
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4o-mini",
+                model="gpt-4",
                 messages=temp_messages,
                 max_tokens=2000,  # Adjust max_tokens as needed
                 temperature=0.0,
@@ -825,7 +843,7 @@ def generate_final_response(prompt, db_data, messages=None):
 
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4o-mini",
+                model="gpt-4",
                 messages=temp_messages,
                 max_tokens=2000,  # Adjust max_tokens as needed
                 temperature=0.0,
@@ -903,7 +921,7 @@ def requires_more_data(prompt, messages=None):
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=messages_to_use,
             max_tokens=5,  # Reduced to get concise 'yes' or 'no'
             temperature=0.0,
@@ -944,7 +962,7 @@ def is_related_to_previous_prompt(new_prompt, previous_prompts):
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=messages_to_use,
             max_tokens=5,  # Reduced to get concise 'yes' or 'no'
             temperature=0.0,
