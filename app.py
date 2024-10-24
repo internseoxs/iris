@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 import openai
 import psycopg2
 from psycopg2 import pool  # For efficient database connection pooling
@@ -10,6 +10,7 @@ from datetime import datetime, date
 import logging
 import os
 import uuid  # For generating unique chat IDs
+from functools import wraps
 
 app = Flask(__name__)  # Fixed Flask app initialization
 
@@ -19,135 +20,124 @@ conversation_history = []
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Set OpenAI API key from environment variable
-openai_api_key = os.environ.get('OPENAI_API_KEY')
+# Load configuration from config.json file
+with open('config.json', 'r') as config_file:
+    config = json.load(config_file)
+
+# Set OpenAI API key from config file
+openai_api_key = config.get('openai_api_key')
 if not openai_api_key:
-    logging.error('OpenAI API key is missing in the environment variables')
-    raise ValueError('OpenAI API key is missing in the environment variables')
+    logging.error('OpenAI API key is missing in the configuration file')
+    raise ValueError('OpenAI API key is missing in the configuration file')
 openai.api_key = openai_api_key
 
 # Secret key for Flask (can be used for sessions, etc.)
-app.secret_key = os.environ.get('SECRET_KEY')
-if not app.secret_key:
-    logging.error('Secret key is missing in the environment variables')
-    raise ValueError('Secret key is missing in the environment variables')
+app.secret_key = config.get('secret_key')
 
-# Database connection parameters from environment variables
-sabre_db_config = {
-    'host': os.environ.get('SABRE_DB_HOST'),
-    'port': os.environ.get('SABRE_DB_PORT'),
-    'dbname': os.environ.get('SABRE_DB_NAME'),
-    'user': os.environ.get('SABRE_DB_USER'),
-    'password': os.environ.get('SABRE_DB_PASSWORD'),
-    'sslmode': os.environ.get('SABRE_DB_SSLMODE', 'prefer'),
-    'sslrootcert': os.environ.get('SABRE_DB_SSLROOTCERT'),
-    'sslcert': os.environ.get('SABRE_DB_SSLCERT'),
-    'sslkey': os.environ.get('SABRE_DB_SSLKEY'),
-    'sslcrl': os.environ.get('SABRE_DB_SSLCRL'),
-}
+# Database connection parameters from config file
+sabre_db_config = config['database']['sabre_db1']
+chat_history_db_config = config['database']['chat_history']
 
-chat_history_db_config = {
-    'host': os.environ.get('CHAT_HISTORY_DB_HOST'),
-    'port': os.environ.get('CHAT_HISTORY_DB_PORT'),
-    'dbname': os.environ.get('CHAT_HISTORY_DB_NAME'),
-    'user': os.environ.get('CHAT_HISTORY_DB_USER'),
-    'password': os.environ.get('CHAT_HISTORY_DB_PASSWORD'),
-    'sslmode': os.environ.get('CHAT_HISTORY_DB_SSLMODE', 'prefer'),
-    'sslrootcert': os.environ.get('CHAT_HISTORY_DB_SSLROOTCERT'),
-    'sslcert': os.environ.get('CHAT_HISTORY_DB_SSLCERT'),
-    'sslkey': os.environ.get('CHAT_HISTORY_DB_SSLKEY'),
-    'sslcrl': os.environ.get('CHAT_HISTORY_DB_SSLCRL'),
-}
-
-# Check if all necessary keys are present for Sabre DB
-required_sabre_vars = ['host', 'port', 'dbname', 'user', 'password']
-missing_sabre_vars = [key for key in required_sabre_vars if not sabre_db_config.get(key)]
+# Check if all necessary keys are present in the config file for Sabre DB
+missing_sabre_vars = [key for key, value in sabre_db_config.items() if not value]
 if missing_sabre_vars:
     logging.error(f"Missing configuration values for Sabre DB1: {', '.join(missing_sabre_vars)}")
     raise ValueError(f"Missing configuration values for Sabre DB1: {', '.join(missing_sabre_vars)}")
 
-# Check if all necessary keys are present for Chat History DB
-required_chat_history_vars = ['host', 'port', 'dbname', 'user', 'password']
-missing_chat_history_vars = [key for key in required_chat_history_vars if not chat_history_db_config.get(key)]
+# Check if all necessary keys are present in the config file for Chat History DB
+missing_chat_history_vars = [key for key, value in chat_history_db_config.items() if not value]
 if missing_chat_history_vars:
     logging.error(f"Missing configuration values for Chat History DB: {', '.join(missing_chat_history_vars)}")
     raise ValueError(f"Missing configuration values for Chat History DB: {', '.join(missing_chat_history_vars)}")
 
-# Function to create a database connection pool with SSL support
-def create_db_pool(db_config, db_name):
-    try:
-        pool = psycopg2.pool.SimpleConnectionPool(
-            1,   # Minimum number of connections
-            20,  # Maximum number of connections
-            host=db_config['host'],
-            port=db_config['port'],
-            dbname=db_config['dbname'],
-            user=db_config['user'],
-            password=db_config['password'],
-            sslmode=db_config.get('sslmode', 'prefer'),
-            sslrootcert=db_config.get('sslrootcert'),
-            sslcert=db_config.get('sslcert'),
-            sslkey=db_config.get('sslkey'),
-            sslcrl=db_config.get('sslcrl'),
-        )
-        logging.info(f"{db_name} connection pool created successfully")
-        return pool
-    except Exception as e:
-        logging.error(f"Error creating database connection pool for {db_name}: {e}")
-        raise
-
 # Create connection pools for both databases
-sabre_db_pool = create_db_pool(sabre_db_config, 'sabre_db1')
-chat_history_pool = create_db_pool(chat_history_db_config, 'chat_history')
+try:
+    sabre_db_pool = psycopg2.pool.SimpleConnectionPool(
+        1,   # Minimum number of connections
+        20,  # Maximum number of connections
+        host=sabre_db_config['host'],
+        port=sabre_db_config['port'],
+        dbname=sabre_db_config['dbname'],
+        user=sabre_db_config['user'],
+        password=sabre_db_config['password']
+    )
+    logging.info("sabre_db1 connection pool created successfully")
 
-def get_database_schema():
-    """Retrieve table and column names from the sabre_db1 PostgreSQL database."""
-    logging.debug("Attempting to retrieve database schema from sabre_db1")
-    try:
-        conn = sabre_db_pool.getconn()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT table_name, column_name
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-        """)
-        schema = cursor.fetchall()
-        cursor.close()
-        sabre_db_pool.putconn(conn)
+    chat_history_pool = psycopg2.pool.SimpleConnectionPool(
+        1,   # Minimum number of connections
+        20,  # Maximum number of connections
+        host=chat_history_db_config['host'],
+        port=chat_history_db_config['port'],
+        dbname=chat_history_db_config['dbname'],
+        user=chat_history_db_config['user'],
+        password=chat_history_db_config['password']
+    )
+    logging.info("chat_history connection pool created successfully")
+except Exception as e:
+    logging.error("Error creating database connection pools: %s", e)
+    raise
 
-        schema_dict = {}
-        for table, column in schema:
-            if table not in schema_dict:
-                schema_dict[table] = []
-            schema_dict[table].append(column)
+# Function to protect routes that require login
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
-        logging.info("Successfully retrieved database schema from sabre_db1")
-        return schema_dict
+# Route to render the login page
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
 
-    except Exception as e:
-        logging.error("Error fetching database schema from sabre_db1: %s", e)
-        return {}
+        user = get_user_by_username(username)
+        if user and check_password(password, user['password']):
+            # Store user in session
+            session['username'] = username
+            return redirect(url_for('index'))  # Redirect to the main page after login
+        else:
+            return render_template('login.html', error="Invalid credentials")
 
-def format_schema_for_gpt(schema):
-    """Format the schema in a way that can be included in the prompt to GPT."""
-    logging.debug("Formatting database schema for GPT")
-    formatted_schema = ""
-    for table, columns in schema.items():
-        formatted_schema += f"Table: {table}\nColumns: {', '.join(columns)}\n\n"
-    return formatted_schema
+    return render_template('login.html')
 
-def get_serializable_messages(messages):
-    """Extracts 'role' and 'content' from messages, ensures 'content' is serializable."""
-    serializable_messages = []
-    for msg in messages:
-        serializable_msg = {
-            "role": msg["role"],
-            "content": msg["content"]
-        }
-        serializable_messages.append(serializable_msg)
-    return serializable_messages
+# Route to logout
+@app.route('/logout')
+def logout():
+    session.pop('username', None)
+    return redirect(url_for('login'))
 
+# Route to display the main chat interface, protected by login
+@app.route('/')
+@login_required
+def index():
+    logging.info("Rendering index page")
+    return render_template("index.html")
+
+# Route to fetch chat history
+@app.route("/chat-history", methods=["GET"])
+@login_required
+def chat_history_route():
+    """Endpoint to fetch the chat history."""
+    logging.info("Fetching chat history")
+    return jsonify({'history': conversation_history})
+
+# Route to submit a query (your existing submit_query route)
+@app.route("/submit_query", methods=["POST"])
+@login_required
+def submit_query():
+    prompt = request.form.get('prompt')
+    if not prompt:
+        logging.warning("No prompt provided in submit_query")
+        return render_template("contact.html", query=None, results=None, error="No prompt provided.")
+    logging.info("Received prompt in submit_query: %s", prompt)
+    return render_template("about.html", prompt=prompt)
+
+# Route to edit a prompt
 @app.route('/edit-prompt', methods=['POST'])
+@login_required
 def edit_prompt():
     data = request.get_json()
     chat_index = data.get('chat_index')  # Index of the chat session
@@ -182,65 +172,9 @@ def edit_prompt():
         logging.error("Error updating conversation history: %s", e)
         return jsonify({'error': 'An error occurred while editing the prompt'}), 500
 
-def generate_response_for_edit(chat_index, message_index):
-    """Generates a response for an edited prompt starting from generate_response workflow."""
-    chat_session = conversation_history[chat_index]
-    messages = chat_session['messages']
-
-    # Extract the updated prompt
-    prompt = messages[message_index]["content"]
-    logging.info("Processing edited prompt in generate_response_for_edit: %s", prompt)
-
-    # Remove any messages after the edited prompt (if any)
-    del messages[message_index + 1:]
-
-    schema = get_database_schema()
-    if not schema:
-        logging.error("Failed to retrieve database schema from sabre_db1")
-        return jsonify({'error': 'Failed to retrieve database schema'}), 500
-
-    formatted_schema = format_schema_for_gpt(schema)
-
-    # Determine if new data is needed based on the current prompt
-    requires_data = requires_more_data(prompt, messages)
-    logging.info("Determined that new data is %s for the prompt", "required" if requires_data else "not required")
-
-    # Determine if the new prompt is related to previous prompts
-    previous_prompts = [msg['content'] for msg in messages if msg['role'] == 'user' and msg['content'] != prompt]
-    is_related = is_related_to_previous_prompt(prompt, previous_prompts)
-    logging.info("Determined that edited prompt is %s to previous prompts", "related" if is_related else "not related")
-
-    response = process_data_and_generate_response(chat_session, prompt, formatted_schema, messages, requires_data, is_related)
-    return response
-
-def is_incomplete_prompt(prompt):
-    # Example rule-based logic (you can customize this)
-    if len(prompt.strip()) == 0:
-        return True
-    # Additional checks can be added here
-    return False
-
-@app.route("/", methods=["GET"])
-def index():
-    logging.info("Rendering index page")
-    return render_template("index.html")
-
-@app.route("/chat-history", methods=["GET"])
-def chat_history_route():
-    """Endpoint to fetch the chat history."""
-    logging.info("Fetching chat history")
-    return jsonify({'history': conversation_history})
-
-@app.route("/submit_query", methods=["POST"])
-def submit_query():
-    prompt = request.form.get('prompt')
-    if not prompt:
-        logging.warning("No prompt provided in submit_query")
-        return render_template("contact.html", query=None, results=None, error="No prompt provided.")
-    logging.info("Received prompt in submit_query: %s", prompt)
-    return render_template("about.html", prompt=prompt)
-
+# Route to generate response based on a prompt
 @app.route('/generate-response', methods=['POST'])
+@login_required
 def generate_response():
     data = request.get_json()
     if not data or 'prompt' not in data:
@@ -306,6 +240,157 @@ def generate_response():
 
     response = process_data_and_generate_response(chat_session, user_input, formatted_schema, messages, requires_data, is_related)
     return response
+
+# Utility functions for user authentication
+def get_user_by_username(username):
+    """Retrieve user information from the database."""
+    try:
+        conn = chat_history_pool.getconn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, password_hash FROM users WHERE username = %s", (username,))
+        user = cursor.fetchone()
+        cursor.close()
+        chat_history_pool.putconn(conn)
+        if user:
+            return {'username': user[0], 'password': user[1]}
+        return None
+    except Exception as e:
+        logging.error("Error fetching user: %s", e)
+        return None
+
+def check_password(plain_password, stored_password):
+    """Compare the plain password with the stored password."""
+    return plain_password == stored_password
+
+# Add the rest of your utility functions here...
+# Example: get_database_schema, format_schema_for_gpt, generate_sql_query, etc.
+
+def generate_response_for_edit(chat_index, message_index):
+    """Generates a response for an edited prompt starting from generate_response workflow."""
+    chat_session = conversation_history[chat_index]
+    messages = chat_session['messages']
+
+    # Extract the updated prompt
+    prompt = messages[message_index]["content"]
+    logging.info("Processing edited prompt in generate_response_for_edit: %s", prompt)
+
+    # Remove any messages after the edited prompt (if any)
+    del messages[message_index + 1:]
+
+    schema = get_database_schema()
+    if not schema:
+        logging.error("Failed to retrieve database schema from sabre_db1")
+        return jsonify({'error': 'Failed to retrieve database schema'}), 500
+
+    formatted_schema = format_schema_for_gpt(schema)
+
+    # Determine if new data is needed based on the current prompt
+    requires_data = requires_more_data(prompt, messages)
+    logging.info("Determined that new data is %s for the prompt", "required" if requires_data else "not required")
+
+    # Determine if the new prompt is related to previous prompts
+    previous_prompts = [msg['content'] for msg in messages if msg['role'] == 'user' and msg['content'] != prompt]
+    is_related = is_related_to_previous_prompt(prompt, previous_prompts)
+    logging.info("Determined that edited prompt is %s to previous prompts", "related" if is_related else "not related")
+
+    response = process_data_and_generate_response(chat_session, prompt, formatted_schema, messages, requires_data, is_related)
+    return response
+
+def is_incomplete_prompt(prompt):
+    # Example rule-based logic (you can customize this)
+    if len(prompt.strip()) == 0:
+        return True
+    # Additional checks can be added here
+    return False
+
+# ... (Include the rest of your utility functions here, unchanged)
+def get_database_schema():
+    """Retrieve table and column names from the sabre_db1 PostgreSQL database."""
+    logging.debug("Attempting to retrieve database schema from sabre_db1")
+    try:
+        conn = sabre_db_pool.getconn()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT table_name, column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+        """)
+        schema = cursor.fetchall()
+        cursor.close()
+        sabre_db_pool.putconn(conn)
+
+        schema_dict = {}
+        for table, column in schema:
+            if table not in schema_dict:
+                schema_dict[table] = []
+            schema_dict[table].append(column)
+
+        logging.info("Successfully retrieved database schema from sabre_db1")
+        return schema_dict
+
+    except Exception as e:
+        logging.error("Error fetching database schema from sabre_db1: %s", e)
+        return {}
+
+def format_schema_for_gpt(schema):
+    """Format the schema in a way that can be included in the prompt to GPT."""
+    logging.debug("Formatting database schema for GPT")
+    formatted_schema = ""
+    for table, columns in schema.items():
+        formatted_schema += f"Table: {table}\nColumns: {', '.join(columns)}\n\n"
+    return formatted_schema
+
+def get_serializable_messages(messages):
+    """Extracts 'role' and 'content' from messages, ensures 'content' is serializable."""
+    serializable_messages = []
+    for msg in messages:
+        serializable_msg = {
+            "role": msg["role"],
+            "content": msg["content"]
+        }
+        serializable_messages.append(serializable_msg)
+    return serializable_messages
+
+
+def generate_response_for_edit(chat_index, message_index):
+    """Generates a response for an edited prompt starting from generate_response workflow."""
+    chat_session = conversation_history[chat_index]
+    messages = chat_session['messages']
+
+    # Extract the updated prompt
+    prompt = messages[message_index]["content"]
+    logging.info("Processing edited prompt in generate_response_for_edit: %s", prompt)
+
+    # Remove any messages after the edited prompt (if any)
+    del messages[message_index + 1:]
+
+    schema = get_database_schema()
+    if not schema:
+        logging.error("Failed to retrieve database schema from sabre_db1")
+        return jsonify({'error': 'Failed to retrieve database schema'}), 500
+
+    formatted_schema = format_schema_for_gpt(schema)
+
+    # Determine if new data is needed based on the current prompt
+    requires_data = requires_more_data(prompt, messages)
+    logging.info("Determined that new data is %s for the prompt", "required" if requires_data else "not required")
+
+    # Determine if the new prompt is related to previous prompts
+    previous_prompts = [msg['content'] for msg in messages if msg['role'] == 'user' and msg['content'] != prompt]
+    is_related = is_related_to_previous_prompt(prompt, previous_prompts)
+    logging.info("Determined that edited prompt is %s to previous prompts", "related" if is_related else "not related")
+
+    response = process_data_and_generate_response(chat_session, prompt, formatted_schema, messages, requires_data, is_related)
+    return response
+
+def is_incomplete_prompt(prompt):
+    # Example rule-based logic (you can customize this)
+    if len(prompt.strip()) == 0:
+        return True
+    # Additional checks can be added here
+    return False
+
+
 
 def clarify_prompt(prompt, messages):
     """
@@ -563,9 +648,9 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
     # Create the base system message with instructions and schema
     system_prompt = (
         "As a SQL expert, generate a safe, read-only SQL query based on the user's prompt and the provided database schema. "
-        "Generate correct syntax of query and only return SQL query in response. "
+        "generate correct syntax of query and only return sql query in response"
         "Determine what data is needed to answer the prompt. The query should fetch necessary data for analysis. "
-        "Generate query in such a way that if some name columns are present in that table, then they must be extracted. "
+        "Generate query in this way that if some names column are present in that table then they are must extracted. "
         "If the effective date is greater than the ship date, then orders are late; if the effective date is less than or equal to the ship date, then it's on time. "
         "Ensure the query is syntactically correct and optimized. Do not ask for clarification.\n\n"
         "Database Schema:\n" + schema
@@ -747,7 +832,7 @@ def generate_final_response(prompt, db_data, messages=None):
             response = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 messages=temp_messages,
-                max_tokens=2000,
+                max_tokens=8000,
                 temperature=0.0,
                 n=1,
             )
@@ -772,7 +857,7 @@ def generate_final_response(prompt, db_data, messages=None):
             response = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 messages=temp_messages,
-                max_tokens=2000,
+                max_tokens=8000,
                 temperature=0.0,
                 n=1,
             )
@@ -912,5 +997,6 @@ def ensure_semicolon(sql_query):
         return sql_query + ';' if not sql_query.endswith(';') else sql_query
     return sql_query
 
+# At the end of your code
 if __name__ == "__main__":
     app.run(debug=True)
