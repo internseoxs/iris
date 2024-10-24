@@ -354,15 +354,6 @@ h2 {
         let currentChatIndex = null;
         let recognizing = false;
         let recognition;
-        let loadingInterval;
-
-        const loadingMessages = [
-            "Generating response...",
-            "Just a moment...",
-            "Thinking...",
-            "Processing your request...",
-            "Hang tight..."
-        ];
 
         document.addEventListener("DOMContentLoaded", () => {
             // Clear chat history on page load
@@ -465,6 +456,10 @@ h2 {
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
+        // ... (rest of your existing JavaScript code remains unchanged)
+
+
+
         function editPrompt(chatIndex, messageIndex) {
             const prompt = chatHistory[chatIndex].messages[messageIndex].content;
             document.getElementById('prompt').value = prompt; // Load message content into the input field
@@ -477,37 +472,14 @@ h2 {
             window.currentEditMessageIndex = messageIndex;
         }
 
-        function showLoadingMessage() {
-            const chatContainer = document.getElementById('chat-container');
-            const loadingMessageElement = document.createElement('div');
-            loadingMessageElement.classList.add('loading-message');
-            loadingMessageElement.innerText = loadingMessages[0];
-            chatContainer.appendChild(loadingMessageElement);
-
-            let messageIndex = 0;
-            loadingInterval = setInterval(() => {
-                messageIndex = (messageIndex + 1) % loadingMessages.length;
-                loadingMessageElement.innerText = loadingMessages[messageIndex];
-            }, 1000);
-        }
-
-        function hideLoadingMessage() {
-            const chatContainer = document.getElementById('chat-container');
-            const loadingMessageElement = chatContainer.querySelector('.loading-message');
-            if (loadingMessageElement) {
-                chatContainer.removeChild(loadingMessageElement);
-            }
-            clearInterval(loadingInterval);
-        }
-
         function saveEditedPrompt() {
             const newPrompt = document.getElementById('prompt').value.trim();
+            const spinner = document.getElementById('loading-spinner');
 
             if (!newPrompt) return;
 
-            // Show loading message
-            showLoadingMessage();
-
+            // Show loading spinner
+            spinner.style.display = 'block';
             // Clear input
             document.getElementById('prompt').value = '';
 
@@ -525,8 +497,8 @@ h2 {
             })
             .then(response => response.json())
             .then(data => {
-                // Hide loading message
-                hideLoadingMessage();
+                // Hide loading spinner
+                spinner.style.display = 'none';
 
                 if (!data.error) {
                     // Update the local chat history and re-render
@@ -549,8 +521,8 @@ h2 {
             })
             .catch(error => {
                 console.error('Error updating prompt:', error);
-                // Hide loading message
-                hideLoadingMessage();
+                // Hide loading spinner
+                spinner.style.display = 'none';
             });
         }
 
@@ -577,12 +549,12 @@ h2 {
 
         function sendPrompt() {
             const prompt = document.getElementById('prompt').value.trim();
+            const spinner = document.getElementById('loading-spinner');
 
             if (!prompt) return;
 
-            // Show loading message
-            showLoadingMessage();
-
+            // Show loading spinner
+            spinner.style.display = 'block';
             document.getElementById('prompt').value = '';
 
             fetch('/generate-response', {
@@ -594,8 +566,8 @@ h2 {
             })
             .then(response => response.json())
             .then(data => {
-                // Hide loading message
-                hideLoadingMessage();
+                // Hide loading spinner
+                spinner.style.display = 'none';
 
                 // Add to chat history
                 if (currentChatIndex !== null && currentChatIndex < chatHistory.length) {
@@ -617,8 +589,8 @@ h2 {
             })
             .catch(error => {
                 console.error('Error:', error);
-                // Hide loading message
-                hideLoadingMessage();
+                // Hide loading spinner
+                spinner.style.display = 'none';
                 alert('An error occurred while processing your request.');
             });
         }
@@ -671,7 +643,7 @@ h2 {
                 <button onclick="sendPrompt()" id="sendButton">Send ↩ </button>
                 <button onclick="saveEditedPrompt()" id="saveEditButton" style="display: none;">Save Edit 💾 </button>
                 <button onclick="cancelEdit()" id="cancelEditButton" style="display: none;">Cancel Edit ✖ </button>
-                <button class="new-chat-button" onclick="newChat()">New ✒️ </button>
+                <button class="new-chat-button" onclick="newChat()">New ✒ </button>
                 <!-- Voice recognition button -->
                 <button class="mic-button" id="micButton" onclick="startRecognition()">Speak 🎤</button>
             </div>
@@ -684,5 +656,7 @@ h2 {
             </div>
         </div>
     </div>
+
+    <div id="loading-spinner" class="loading-spinner"></div>
 </body>
 </html>
