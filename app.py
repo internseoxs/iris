@@ -50,17 +50,21 @@ def login_required(f):
 # Route to render the login page
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # Clear session every time login page is visited
+    session.clear()
+
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
 
         user = get_user_by_username(username)
         if user and check_password(password, user['password']):
-            # Store user in session
+            # Store user in session only after successful authentication
             session['username'] = username
             return redirect(url_for('index'))
         else:
             return render_template('login.html', error="Invalid credentials")
+
     return render_template('login.html')
 
 # Route to logout
@@ -75,8 +79,6 @@ def logout():
 def index():
     logging.info("Rendering index page")
     return render_template("index.html")
-
-# Route to fetch chat history
 @app.route("/chat-history", methods=["GET"])
 @login_required
 def chat_history_route():
@@ -132,6 +134,7 @@ def edit_prompt():
     except IndexError as e:
         logging.error("Error updating conversation history: %s", e)
         return jsonify({'error': 'An error occurred while editing the prompt'}), 500
+
 
 # Route to generate a response
 @app.route('/generate-response', methods=['POST'])
