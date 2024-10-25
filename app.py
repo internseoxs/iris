@@ -36,6 +36,7 @@ app.secret_key = config.get('secret_key')
 sabre_db_config = config['database']['sabre_db1']
 chat_history_db_config = config['database']['chat_history']
 
+
 # Function to protect routes that require login
 def login_required(f):
     @wraps(f)
@@ -45,7 +46,9 @@ def login_required(f):
             return redirect(url_for('login'))
         logging.debug("User is logged in")
         return f(*args, **kwargs)
+
     return decorated_function
+
 
 # Route to render the login page
 @app.route('/login', methods=['GET', 'POST'])
@@ -67,24 +70,39 @@ def login():
 
     return render_template('login.html')
 
+
+# Redirect any initial URL access to the login page
+@app.route('/')
+def home():
+    # Always redirect to login page if user is not authenticated
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    return redirect(url_for('index'))
+
+
 # Route to logout
 @app.route('/logout')
 def logout():
     session.pop('username', None)
     return redirect(url_for('login'))
 
+
 # Route to display the main chat interface, protected by login
-@app.route('/')
+@app.route('/index')
 @login_required
 def index():
     logging.info("Rendering index page")
     return render_template("index.html")
+
+
+# Route to fetch chat history
 @app.route("/chat-history", methods=["GET"])
 @login_required
 def chat_history_route():
     """Endpoint to fetch the chat history."""
     logging.info("Fetching chat history")
     return jsonify({'history': conversation_history})
+
 
 # Route to submit a query
 @app.route("/submit_query", methods=["POST"])
@@ -96,6 +114,7 @@ def submit_query():
         return render_template("contact.html", query=None, results=None, error="No prompt provided.")
     logging.info("Received prompt in submit_query: %s", prompt)
     return render_template("about.html", prompt=prompt)
+
 
 # Route to edit a prompt
 @app.route('/edit-prompt', methods=['POST'])
@@ -134,6 +153,7 @@ def edit_prompt():
     except IndexError as e:
         logging.error("Error updating conversation history: %s", e)
         return jsonify({'error': 'An error occurred while editing the prompt'}), 500
+
 
 
 # Route to generate a response
