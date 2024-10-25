@@ -36,7 +36,6 @@ app.secret_key = config.get('secret_key')
 sabre_db_config = config['database']['sabre_db1']
 chat_history_db_config = config['database']['chat_history']
 
-
 # Function to protect routes that require login
 def login_required(f):
     @wraps(f)
@@ -46,9 +45,7 @@ def login_required(f):
             return redirect(url_for('login'))
         logging.debug("User is logged in")
         return f(*args, **kwargs)
-
     return decorated_function
-
 
 # Route to render the login page
 @app.route('/login', methods=['GET', 'POST'])
@@ -67,25 +64,20 @@ def login():
             return redirect(url_for('index'))
         else:
             return render_template('login.html', error="Invalid credentials")
-
+    
     return render_template('login.html')
 
-
-# Redirect any initial URL access to the login page
+# Route to handle the home URL and redirect to login
 @app.route('/')
 def home():
-    # Always redirect to login page if user is not authenticated
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    return redirect(url_for('index'))
-
+    # Always redirect to login page
+    return redirect(url_for('login'))
 
 # Route to logout
 @app.route('/logout')
 def logout():
     session.pop('username', None)
     return redirect(url_for('login'))
-
 
 # Route to display the main chat interface, protected by login
 @app.route('/index')
@@ -94,7 +86,6 @@ def index():
     logging.info("Rendering index page")
     return render_template("index.html")
 
-
 # Route to fetch chat history
 @app.route("/chat-history", methods=["GET"])
 @login_required
@@ -102,7 +93,6 @@ def chat_history_route():
     """Endpoint to fetch the chat history."""
     logging.info("Fetching chat history")
     return jsonify({'history': conversation_history})
-
 
 # Route to submit a query
 @app.route("/submit_query", methods=["POST"])
@@ -114,7 +104,6 @@ def submit_query():
         return render_template("contact.html", query=None, results=None, error="No prompt provided.")
     logging.info("Received prompt in submit_query: %s", prompt)
     return render_template("about.html", prompt=prompt)
-
 
 # Route to edit a prompt
 @app.route('/edit-prompt', methods=['POST'])
@@ -153,8 +142,6 @@ def edit_prompt():
     except IndexError as e:
         logging.error("Error updating conversation history: %s", e)
         return jsonify({'error': 'An error occurred while editing the prompt'}), 500
-
-
 
 # Route to generate a response
 @app.route('/generate-response', methods=['POST'])
@@ -231,7 +218,6 @@ def get_user_by_username(username):
 def check_password(plain_password, stored_password):
     return plain_password == stored_password
 
-# Additional utility functions such as get_database_schema, generate_sql_query, etc.
 def get_database_schema():
     """Retrieve table and column names from the sabre_db1 PostgreSQL database."""
     logging.debug("Attempting to retrieve database schema from sabre_db1")
@@ -267,7 +253,6 @@ def get_database_schema():
         logging.error("Error fetching database schema from sabre_db1: %s", e)
         return {}
 
-# Utility function examples
 def is_incomplete_prompt(prompt):
     return len(prompt.strip()) == 0
 
@@ -291,12 +276,9 @@ def get_serializable_messages(messages):
     return serializable_messages
 
 def clarify_prompt(prompt, messages):
-    """
-    Check if the prompt needs clarification and generate clarifying questions if needed.
-    """
+    """Check if the prompt needs clarification and generate clarifying questions if needed."""
     logging.info("Checking if prompt needs clarification.")
 
-    # System message to instruct GPT to ask clarifying questions if needed
     system_message = {
         "role": "system",
         "content": (
@@ -306,14 +288,11 @@ def clarify_prompt(prompt, messages):
         )
     }
 
-    # Use the last few messages for context
     recent_messages = get_serializable_messages(messages[-4:]) if messages else []
 
-    # Add the user's prompt to the conversation
     recent_messages.append({"role": "user", "content": f"Is this prompt clear: {prompt}"})
 
     try:
-        # Call GPT to determine if clarification is needed
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[system_message] + recent_messages,
@@ -325,11 +304,9 @@ def clarify_prompt(prompt, messages):
         clarification_response = response.choices[0].message['content'].strip().lower()
         logging.info("GPT clarification check result: %s", clarification_response)
 
-        # If GPT says "clear", return None (no clarification needed)
         if 'clear' in clarification_response:
-            return None  # No clarification needed
+            return None
 
-        # Otherwise, return the clarification response as a question or guidance
         return clarification_response
     except Exception as e:
         logging.error("Error generating clarification question: %s", e)
@@ -337,7 +314,7 @@ def clarify_prompt(prompt, messages):
 
 def process_data_and_generate_response(chat_session, prompt, formatted_schema, messages, requires_data, is_related):
     """Process data and generate response based on the prompt, whether data is required, and if it's related to previous prompts."""
-    max_attempts = 3  # Increased to allow more attempts for correct SQL generation
+    max_attempts = 3
     attempt = 0
     sql_query = None
     new_data = None
@@ -348,7 +325,6 @@ def process_data_and_generate_response(chat_session, prompt, formatted_schema, m
         previous_data = None
 
         if is_related:
-            # If the prompt is related to previous prompts, try to use previous SQL query and data
             for message in reversed(messages):
                 if message['role'] == 'assistant' and 'sql_query' in message and 'data' in message:
                     previous_sql_query = message['sql_query']
@@ -358,39 +334,31 @@ def process_data_and_generate_response(chat_session, prompt, formatted_schema, m
         while attempt < max_attempts:
             attempt += 1
             if attempt == 1:
-                # First attempt: Generate SQL query normally, using previous query/data if available
                 sql_query = generate_sql_query(prompt, formatted_schema, messages, previous_sql_query, previous_data)
             else:
-                # Subsequent attempts: Correct the SQL query based on the error
                 if error_message:
                     sql_query = correct_sql_query(sql_query, error_message, formatted_schema, messages, previous_sql_query, previous_data)
                 else:
-                    break  # Cannot proceed without an error message
+                    break
 
             if not sql_query:
                 logging.error("Failed to generate SQL query on attempt %d", attempt)
                 break
 
-            # BEGIN: Validate the generated SQL query
             is_valid, validation_errors = validate_sql_query(sql_query, formatted_schema)
             if not is_valid:
                 logging.error("SQL query validation failed on attempt %d: %s", attempt, validation_errors)
                 error_message = f"SQL validation error: {validation_errors}"
-                continue  # Attempt to regenerate or correct the SQL
-            # END: Validate the generated SQL query
+                continue
 
             logging.info("Attempting to execute SQL query: %s", sql_query)
 
-            # Execute the SQL query
             new_data, error_message = execute_sql_query(sql_query)
             if new_data is not None:
-                # Success
-                # Do not include 'sql_query' and 'data' in messages passed to OpenAI API
                 messages.append({
                     "role": "assistant",
                     "content": f"Data Retrieved."
                 })
-                # Store 'sql_query' and 'data' separately in the message, but these won't be sent to OpenAI API
                 messages[-1]['sql_query'] = sql_query
                 messages[-1]['data'] = new_data
                 logging.debug("Data retrieved and added to conversation history")
@@ -399,60 +367,41 @@ def process_data_and_generate_response(chat_session, prompt, formatted_schema, m
                 logging.error("SQL query execution failed on attempt %d with error: %s", attempt, error_message)
 
         if new_data is None:
-            # All attempts failed
             logging.error("All attempts to execute SQL query failed")
-            # Let ChatGPT answer the prompt without data
             final_response = generate_final_response(prompt, None, messages)
             if not final_response:
                 logging.error("Failed to generate final response")
                 return jsonify({'error': 'Failed to generate final response'}), 500
 
-            # Append the assistant's response to conversation history
             messages.append({"role": "assistant", "content": final_response})
 
-            # Save to database
             save_interaction_to_db(prompt, final_response)
-            # Note: Since no SQL query or data was used, we don't pass them here
-
-            logging.info("Returning final response to the user")
             return jsonify({'response': final_response})
         else:
-            # Generate the final response using the data retrieved
             final_response = generate_final_response(prompt, new_data, messages)
             if not final_response:
                 logging.error("Failed to generate final response")
                 return jsonify({'error': 'Failed to generate final response'}), 500
 
-            # Append the assistant's response to conversation history
             messages.append({"role": "assistant", "content": final_response})
 
-            # Save to database, including sql_query and data
             save_interaction_to_db(prompt, final_response, sql_query, new_data)
 
             logging.info("Returning final response to the user")
             return jsonify({'response': final_response})
     else:
-        # If data is not required, generate final response without fetching data
         final_response = generate_final_response(prompt, None, messages)
         if not final_response:
             logging.error("Failed to generate final response")
             return jsonify({'error': 'Failed to generate final response'}), 500
 
-        # Append the assistant's response to conversation history
         messages.append({"role": "assistant", "content": final_response})
 
-        # Save to database
         save_interaction_to_db(prompt, final_response)
-        # Note: Since no SQL query or data was used, we don't pass them here
-
-        logging.info("Returning final response to the user")
         return jsonify({'response': final_response})
 
 def validate_sql_query(sql_query, schema):
-    """
-    Validate the SQL query against the database schema.
-    Returns a tuple (is_valid: bool, errors: str).
-    """
+    """Validate the SQL query against the database schema."""
     logging.debug("Validating SQL query against the database schema")
 
     try:
@@ -464,20 +413,17 @@ def validate_sql_query(sql_query, schema):
         if statement.get_type() != 'SELECT':
             return False, "Only SELECT statements are allowed."
 
-        # Extract tables and columns from the SQL query
         tables, columns = extract_tables_and_columns(sql_query)
 
         errors = []
 
-        # Validate tables
         for table in tables:
             if table not in schema:
                 errors.append(f"Table '{table}' does not exist in the database schema.")
 
-        # Validate columns
         for table, cols in columns.items():
             if table not in schema:
-                continue  # Table existence already checked
+                continue
             for col in cols:
                 if col not in schema[table]:
                     errors.append(f"Column '{col}' does not exist in table '{table}'.")
@@ -491,10 +437,7 @@ def validate_sql_query(sql_query, schema):
         return False, str(e)
 
 def extract_tables_and_columns(sql_query):
-    """
-    Extract table names and column names from the SQL query using sqlparse.
-    Returns a tuple (tables: list, columns: dict).
-    """
+    """Extract table names and column names from the SQL query using sqlparse."""
     logging.debug("Extracting tables and columns from SQL query")
     tables = []
     columns = {}
@@ -511,13 +454,11 @@ def extract_tables_and_columns(sql_query):
             if select_seen and isinstance(token, sqlparse.sql.IdentifierList):
                 for identifier in token.get_identifiers():
                     if isinstance(identifier, sqlparse.sql.Identifier):
-                        # Handle aliases
                         if identifier.get_real_name():
                             parent_name = identifier.get_parent_name()
                             if parent_name:
                                 columns.setdefault(parent_name, []).append(identifier.get_real_name())
                             else:
-                                # Handle cases without table aliases
                                 columns.setdefault('unknown_table', []).append(identifier.get_real_name())
             if isinstance(token, sqlparse.sql.From):
                 for identifier in token.get_sublists():
@@ -531,19 +472,10 @@ def extract_tables_and_columns(sql_query):
         logging.error("Error extracting tables and columns: %s", e)
         return [], {}
 
-def get_database_schema_dict():
-    """Retrieve the database schema as a dictionary for validation."""
-    return get_database_schema()
-
-def format_schema_as_dict(schema):
-    """Ensure the schema is in dictionary format."""
-    return schema  # Assuming get_database_schema() already returns a dict
-
 def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, previous_data=None):
     """Generate SQL query based on user prompt, schema, and conversation history."""
     logging.debug("Generating SQL query based on the prompt")
 
-    # Create the base system message with instructions and schema
     system_prompt = (
         "As a SQL expert, generate a safe, read-only SQL query based on the user's prompt and the provided database schema. "
         "Generate correct syntax of query and only return SQL query in response. "
@@ -555,7 +487,6 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
     )
 
     if previous_sql_query and previous_data:
-        # Include previous query and a sample of previous data
         sample_data = previous_data[:5] if len(previous_data) > 5 else previous_data
         system_prompt += (
             "\n\nPrevious SQL Query:\n" + previous_sql_query +
@@ -564,18 +495,15 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
 
     messages_to_use = [{"role": "system", "content": system_prompt}]
 
-    # Include the last few messages from the conversation history for context
     if messages:
         messages_to_use += get_serializable_messages(messages[-4:])
 
-    # Append the user's prompt
     messages_to_use.append({
         "role": "user",
         "content": f"Generate an SQL query that retrieves the necessary data to answer the following analytical prompt. Do not include unnecessary data.\nPrompt: {prompt}"
     })
 
     try:
-        # Call GPT to generate the SQL query
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
@@ -586,7 +514,6 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
         sql_query = response.choices[0].message['content'].strip()
         logging.info("SQL query generated by GPT: %s", sql_query)
 
-        # Ensure the query is properly terminated with a semicolon
         sql_query = ensure_semicolon(sql_query)
 
         return sql_query
@@ -599,7 +526,6 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
     """Generate a corrected SQL query based on the error message."""
     logging.debug("Generating corrected SQL query based on error message")
 
-    # Create the base system message with instructions and schema
     system_prompt = (
         "As a SQL expert, you have attempted to execute the following SQL query but encountered an error. "
         "Your task is to correct the SQL query based on the error message provided. Do not ask for clarification. "
@@ -610,7 +536,6 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
     )
 
     if previous_sql_query and previous_data:
-        # Include previous query and a sample of previous data
         sample_data = previous_data[:5] if len(previous_data) > 5 else previous_data
         system_prompt += (
             "\n\nPrevious SQL Query:\n" + previous_sql_query +
@@ -619,12 +544,10 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
 
     messages_to_use = [{"role": "system", "content": system_prompt}]
 
-    # Include the last few messages from the conversation history for context
     if messages:
         messages_to_use += get_serializable_messages(messages[-4:])
 
     try:
-        # Call GPT to generate the corrected SQL query
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
@@ -635,7 +558,6 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
         corrected_sql_query = response.choices[0].message['content'].strip()
         logging.info("Corrected SQL query generated by GPT: %s", corrected_sql_query)
 
-        # Ensure the query is properly terminated with a semicolon
         corrected_sql_query = ensure_semicolon(corrected_sql_query)
 
         return corrected_sql_query
@@ -677,18 +599,17 @@ def execute_sql_query(sql_query):
         cursor.execute(sql_query)
         logging.info("SQL query executed successfully")
 
-        # Fetch limited results to prevent sending too much data
-        results = cursor.fetchmany(1000)  # Fetch up to 1000 rows
+        results = cursor.fetchmany(1000)
         colnames = [desc[0] for desc in cursor.description]
         cursor.close()
         conn.close()
 
         logging.debug("Number of rows fetched: %d", len(results))
         data = [dict(zip(colnames, row)) for row in results] if results else []
-        return data, None  # No error
+        return data, None
     except Exception as e:
         logging.error("Error executing SQL query: %s", e)
-        return None, str(e)  # Return error message
+        return None, str(e)
 
 def convert_to_serializable(obj):
     """Convert non-serializable objects to serializable ones."""
@@ -697,33 +618,27 @@ def convert_to_serializable(obj):
     elif isinstance(obj, dict):
         return {key: convert_to_serializable(value) for key, value in obj.items()}
     elif isinstance(obj, Decimal):
-        return float(obj)  # Convert Decimal to float
+        return float(obj)
     elif isinstance(obj, (datetime, date)):
-        return obj.isoformat()  # Convert datetime/date to ISO 8601 string
+        return obj.isoformat()
     else:
         return obj
 
 def generate_final_response(prompt, db_data, messages=None):
-    """
-    Generate the final response by passing the prompt and data to GPT.
-    If no data is available from the database, GPT will answer directly.
-    """
+    """Generate the final response by passing the prompt and data to GPT."""
     logging.debug("Generating final response")
     messages_to_use = [
         {"role": "system",
          "content": "You are a data analyst assistant who provides detailed answers and insights based on the user's prompt and provided data. Use your analytical skills to interpret the data and provide actionable recommendations."}
     ]
 
-    # Include the conversation history for context
     if messages:
-        messages_to_use += get_serializable_messages(messages[-6:])  # Include the last few messages
+        messages_to_use += get_serializable_messages(messages[-6:])
 
     if db_data:
-        # Process database data without chunking
         db_data_serializable = convert_to_serializable(db_data)
         logging.debug("Data has been serialized")
 
-        # Send the entire data to GPT
         temp_messages = messages_to_use.copy()
         temp_messages.append({
             "role": "user",
@@ -750,7 +665,6 @@ def generate_final_response(prompt, db_data, messages=None):
             return None
 
     else:
-        # No new data; generate response based on previous context
         temp_messages = messages_to_use.copy()
         temp_messages.append({
             "role": "user",
@@ -787,18 +701,15 @@ def save_interaction_to_db(user_input, bot_response, sql_query=None, data=None):
         )
         cursor = conn.cursor()
 
-        # Insert into chats table
         cursor.execute("""
             INSERT INTO chats (user_message, bot_response)
             VALUES (%s, %s)
             RETURNING id;
         """, (user_input, bot_response))
-        chat_id = cursor.fetchone()[0]  # Get the ID of the inserted chat
+        chat_id = cursor.fetchone()[0]
 
-        # Generate a UUID for the chat_id in response_history
         chat_uuid = str(uuid.uuid4())
 
-        # Insert into response_history table, including sql_query and data if available
         cursor.execute("""
             INSERT INTO response_history (chat_id, user_input, bot_response, sql_query, data)
             VALUES (%s, %s, %s, %s, %s);
@@ -823,10 +734,8 @@ def requires_more_data(prompt, messages=None):
     logging.debug("Checking if more data is required for the prompt")
 
     if messages is None:
-        # Fallback to global conversation history if no messages are passed
         messages = conversation_history[-1]['messages'] if conversation_history else []
 
-    # Use GPT to determine if new data is needed
     messages_to_use = [
         {
             "role": "system",
@@ -836,7 +745,7 @@ def requires_more_data(prompt, messages=None):
                 "Only respond with 'yes' or 'no'."
             )
         }
-    ] + get_serializable_messages(messages[-4:])  # Include the last few messages for context
+    ] + get_serializable_messages(messages[-4:])
 
     messages_to_use.append({
         "role": "user",
@@ -847,7 +756,7 @@ def requires_more_data(prompt, messages=None):
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=5,  # Reduced to get concise 'yes' or 'no'
+            max_tokens=5,
             temperature=0.0,
             n=1,
         )
@@ -856,7 +765,7 @@ def requires_more_data(prompt, messages=None):
         return answer == 'yes'
     except Exception as e:
         logging.error("Error determining if more data is needed: %s", e)
-        return True  # Default to needing more data if GPT fails
+        return True
 
 def is_related_to_previous_prompt(new_prompt, previous_prompts):
     """Determine if the new prompt is related to the previous prompts."""
@@ -865,10 +774,8 @@ def is_related_to_previous_prompt(new_prompt, previous_prompts):
     if not previous_prompts:
         return False
 
-    # Combine previous prompts into a single string
-    previous_conversation = "\n".join(previous_prompts[-4:])  # Consider the last 4 prompts for context
+    previous_conversation = "\n".join(previous_prompts[-4:])
 
-    # Use GPT to analyze the relation between new_prompt and previous_prompts
     messages_to_use = [
         {
             "role": "system",
@@ -888,7 +795,7 @@ def is_related_to_previous_prompt(new_prompt, previous_prompts):
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=5,  # Reduced to get concise 'yes' or 'no'
+            max_tokens=5,
             temperature=0.0,
             n=1,
         )
@@ -897,7 +804,7 @@ def is_related_to_previous_prompt(new_prompt, previous_prompts):
         return answer == 'yes'
     except Exception as e:
         logging.error("Error determining if prompt is related to previous prompts: %s", e)
-        return False  # Default to not related if GPT fails
+        return False
 
 def ensure_semicolon(sql_query):
     """Ensure the SQL query starts with SELECT and ends with a semicolon."""
