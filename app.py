@@ -8,10 +8,10 @@ from decimal import Decimal
 from datetime import datetime, date
 import logging
 import os
-import uuid  # For generating unique chat IDs
+import uuid
 from functools import wraps
 
-app = Flask(__name__)  # Fixed Flask app initialization
+app = Flask(__name__)
 
 # Initialize conversation history
 conversation_history = []
@@ -29,31 +29,21 @@ if not openai.api_key:
     logging.error('OpenAI API key is missing in the environment variables')
     raise ValueError('OpenAI API key is missing in environment variables')
 
-# Secret key for Flask (can be used for sessions, etc.)
+# Secret key for Flask (used for sessions)
 app.secret_key = config.get('secret_key')
 
 # Database connection parameters from config file
 sabre_db_config = config['database']['sabre_db1']
 chat_history_db_config = config['database']['chat_history']
 
-# Check if all necessary keys are present in the config file for Sabre DB
-missing_sabre_vars = [key for key, value in sabre_db_config.items() if not value]
-if missing_sabre_vars:
-    logging.error(f"Missing configuration values for Sabre DB1: {', '.join(missing_sabre_vars)}")
-    raise ValueError(f"Missing configuration values for Sabre DB1: {', '.join(missing_sabre_vars)}")
-
-# Check if all necessary keys are present in the config file for Chat History DB
-missing_chat_history_vars = [key for key, value in chat_history_db_config.items() if not value]
-if missing_chat_history_vars:
-    logging.error(f"Missing configuration values for Chat History DB: {', '.join(missing_chat_history_vars)}")
-    raise ValueError(f"Missing configuration values for Chat History DB: {', '.join(missing_chat_history_vars)}")
-
 # Function to protect routes that require login
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'username' not in session:
+            logging.debug("User not logged in, redirecting to login page")
             return redirect(url_for('login'))
+        logging.debug("User is logged in")
         return f(*args, **kwargs)
     return decorated_function
 
@@ -68,10 +58,9 @@ def login():
         if user and check_password(password, user['password']):
             # Store user in session
             session['username'] = username
-            return redirect(url_for('index'))  # Redirect to the main page after login
+            return redirect(url_for('index'))
         else:
             return render_template('login.html', error="Invalid credentials")
-
     return render_template('login.html')
 
 # Route to logout
@@ -95,7 +84,7 @@ def chat_history_route():
     logging.info("Fetching chat history")
     return jsonify({'history': conversation_history})
 
-# Route to submit a query (your existing submit_query route)
+# Route to submit a query
 @app.route("/submit_query", methods=["POST"])
 @login_required
 def submit_query():
@@ -111,110 +100,90 @@ def submit_query():
 @login_required
 def edit_prompt():
     data = request.get_json()
-    chat_index = data.get('chat_index')  # Index of the chat session
-    message_index = data.get('message_index')  # Index of the prompt to edit
-    new_content = data.get('content')  # The updated prompt content
+    chat_index = data.get('chat_index')
+    message_index = data.get('message_index')
+    new_content = data.get('content')
 
     if chat_index is None or message_index is None or new_content is None:
         logging.warning("Incomplete data provided for editing prompt")
         return jsonify({'error': 'Incomplete data provided'}), 400
 
     try:
-        # Update the specific message's content in conversation_history
+        if not (0 <= chat_index < len(conversation_history)):
+            logging.error("Invalid chat index provided")
+            return jsonify({'error': 'Invalid chat index'}), 400
+
         chat_session = conversation_history[chat_index]
         messages = chat_session['messages']
 
-        if 0 <= message_index < len(messages):
-            # Replace the old prompt with the new content
-            messages[message_index]["content"] = new_content
-            logging.info("Successfully updated prompt in conversation history")
-
-            # Remove the assistant's response that follows this message
-            if message_index + 1 < len(messages) and messages[message_index + 1]["role"] == "assistant":
-                del messages[message_index + 1]
-
-            # Generate a new response
-            return generate_response_for_edit(chat_index, message_index)
-        else:
-            logging.error("Invalid message index provided for editing prompt")
+        if not (0 <= message_index < len(messages)):
+            logging.error("Invalid message index provided")
             return jsonify({'error': 'Invalid message index'}), 400
 
+        # Update the message
+        messages[message_index]["content"] = new_content
+        logging.info("Prompt updated successfully")
+
+        # Remove assistant's response after the prompt
+        if message_index + 1 < len(messages) and messages[message_index + 1]["role"] == "assistant":
+            del messages[message_index + 1]
+
+        return generate_response_for_edit(chat_index, message_index)
     except IndexError as e:
         logging.error("Error updating conversation history: %s", e)
         return jsonify({'error': 'An error occurred while editing the prompt'}), 500
 
-# Route to generate response based on a prompt
+# Route to generate a response
 @app.route('/generate-response', methods=['POST'])
 @login_required
 def generate_response():
     data = request.get_json()
     if not data or 'prompt' not in data:
-        logging.warning("No prompt provided in generate_response")
+        logging.warning("No prompt provided")
         return jsonify({'error': 'No prompt provided'}), 400
 
     user_input = data['prompt']
-    logging.info("Received prompt in generate_response: %s", user_input)
-
-    # Check if a unique chat session identifier is provided
-    chat_uuid = data.get('chat_uuid')  # Optional: To identify chat sessions uniquely
+    logging.info("Received prompt: %s", user_input)
 
     if is_incomplete_prompt(user_input):
-        logging.warning("Incomplete prompt provided")
         return jsonify({'error': 'Incomplete prompt provided'}), 400
 
     schema = get_database_schema()
     if not schema:
-        logging.error("Failed to retrieve database schema from sabre_db1")
         return jsonify({'error': 'Failed to retrieve database schema'}), 500
 
     formatted_schema = format_schema_for_gpt(schema)
 
-    # Check if a reset is requested or no conversation history exists
     if not conversation_history or 'reset' in data:
-        conversation_history.clear()  # Clear history if reset is requested
+        conversation_history.clear()
         conversation_history.append({'messages': [], 'awaiting_clarification': False})
 
-    chat_session = conversation_history[-1]  # Access the most recent chat session
+    chat_session = conversation_history[-1]
     messages = chat_session['messages']
 
-    # Append the user's prompt to conversation history
     messages.append({"role": "user", "content": user_input})
     logging.debug("Updated conversation history: %s", messages)
 
-    # Check if the system is awaiting clarification
     if chat_session.get('awaiting_clarification'):
-        # Treat this input as a clarification
         chat_session['awaiting_clarification'] = False
-        logging.info("Processing user clarification: %s", user_input)
-        # Optionally, you can update the last clarification question with the user's answer here
+        logging.info("Processing clarification")
     else:
-        # Check if the prompt needs clarification
         clarification = clarify_prompt(user_input, messages)
         if clarification:
-            logging.info("Clarification needed: %s", clarification)
-            # Store the clarifying question in conversation history
             messages.append({"role": "assistant", "content": clarification})
             chat_session['awaiting_clarification'] = True
             return jsonify({'response': clarification})
 
-    # Proceed with generating the response
-    # Get previous prompts
     previous_prompts = [msg['content'] for msg in messages if msg['role'] == 'user' and msg['content'] != user_input]
-
-    # Determine if the new prompt is related to previous prompts
     is_related = is_related_to_previous_prompt(user_input, previous_prompts)
-    logging.info("Determined that new prompt is %s to previous prompts", "related" if is_related else "not related")
 
-    # Determine if new data is needed based on the current prompt
     requires_data = requires_more_data(user_input, messages)
-    logging.info("Determined that new data is %s for the prompt", "required" if requires_data else "not required")
 
     response = process_data_and_generate_response(chat_session, user_input, formatted_schema, messages, requires_data, is_related)
     return response
 
-# Utility functions for user authentication
+# Utility functions
 def get_user_by_username(username):
-    """Retrieve user information from the database."""
     try:
         conn = psycopg2.connect(
             host=chat_history_db_config['host'],
@@ -237,51 +206,9 @@ def get_user_by_username(username):
         return None
 
 def check_password(plain_password, stored_password):
-    """Compare the plain password with the stored password."""
     return plain_password == stored_password
 
-# Add the rest of your utility functions here...
-# Example: get_database_schema, format_schema_for_gpt, generate_sql_query, etc.
-
-def generate_response_for_edit(chat_index, message_index):
-    """Generates a response for an edited prompt starting from generate_response workflow."""
-    chat_session = conversation_history[chat_index]
-    messages = chat_session['messages']
-
-    # Extract the updated prompt
-    prompt = messages[message_index]["content"]
-    logging.info("Processing edited prompt in generate_response_for_edit: %s", prompt)
-
-    # Remove any messages after the edited prompt (if any)
-    del messages[message_index + 1:]
-
-    schema = get_database_schema()
-    if not schema:
-        logging.error("Failed to retrieve database schema from sabre_db1")
-        return jsonify({'error': 'Failed to retrieve database schema'}), 500
-
-    formatted_schema = format_schema_for_gpt(schema)
-
-    # Determine if new data is needed based on the current prompt
-    requires_data = requires_more_data(prompt, messages)
-    logging.info("Determined that new data is %s for the prompt", "required" if requires_data else "not required")
-
-    # Determine if the new prompt is related to previous prompts
-    previous_prompts = [msg['content'] for msg in messages if msg['role'] == 'user' and msg['content'] != prompt]
-    is_related = is_related_to_previous_prompt(prompt, previous_prompts)
-    logging.info("Determined that edited prompt is %s to previous prompts", "related" if is_related else "not related")
-
-    response = process_data_and_generate_response(chat_session, prompt, formatted_schema, messages, requires_data, is_related)
-    return response
-
-def is_incomplete_prompt(prompt):
-    # Example rule-based logic (you can customize this)
-    if len(prompt.strip()) == 0:
-        return True
-    # Additional checks can be added here
-    return False
-
-# ... (Include the rest of your utility functions here, unchanged)
+# Additional utility functions such as get_database_schema, generate_sql_query, etc.
 def get_database_schema():
     """Retrieve table and column names from the sabre_db1 PostgreSQL database."""
     logging.debug("Attempting to retrieve database schema from sabre_db1")
@@ -316,6 +243,10 @@ def get_database_schema():
     except Exception as e:
         logging.error("Error fetching database schema from sabre_db1: %s", e)
         return {}
+
+# Utility function examples
+def is_incomplete_prompt(prompt):
+    return len(prompt.strip()) == 0
 
 def format_schema_for_gpt(schema):
     """Format the schema in a way that can be included in the prompt to GPT."""
