@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 import openai
 import psycopg2
-from psycopg2 import pool  # For efficient database connection pooling
 import json
 import sqlparse
 import re
@@ -24,12 +23,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 with open('config.json', 'r') as config_file:
     config = json.load(config_file)
 
-# Set OpenAI API key from config file
+# Set OpenAI API key from environment variables
 openai.api_key = os.getenv('OPENAI_API_KEY')
 if not openai.api_key:
     logging.error('OpenAI API key is missing in the environment variables')
     raise ValueError('OpenAI API key is missing in environment variables')
-    
+
 # Secret key for Flask (can be used for sessions, etc.)
 app.secret_key = config.get('secret_key')
 
@@ -48,35 +47,6 @@ missing_chat_history_vars = [key for key, value in chat_history_db_config.items(
 if missing_chat_history_vars:
     logging.error(f"Missing configuration values for Chat History DB: {', '.join(missing_chat_history_vars)}")
     raise ValueError(f"Missing configuration values for Chat History DB: {', '.join(missing_chat_history_vars)}")
-
-# Create connection pools for both databases
-try:
-    sabre_db_pool = psycopg2.pool.SimpleConnectionPool(
-        1,   # Minimum number of connections
-        20,  # Maximum number of connections
-        host=sabre_db_config['host'],
-        port=sabre_db_config['port'],
-        dbname=sabre_db_config['dbname'],
-        user=sabre_db_config['user'],
-        password=sabre_db_config['password'],
-        sslmode='require'
-    )
-    logging.info("sabre_db1 connection pool created successfully")
-
-    chat_history_pool = psycopg2.pool.SimpleConnectionPool(
-        1,   # Minimum number of connections
-        20,  # Maximum number of connections
-        host=chat_history_db_config['host'],
-        port=chat_history_db_config['port'],
-        dbname=chat_history_db_config['dbname'],
-        user=chat_history_db_config['user'],
-        password=chat_history_db_config['password'],
-        sslmode='require'        
-    )
-    logging.info("chat_history connection pool created successfully")
-except Exception as e:
-    logging.error("Error creating database connection pools: %s", e)
-    raise
 
 # Function to protect routes that require login
 def login_required(f):
@@ -246,12 +216,19 @@ def generate_response():
 def get_user_by_username(username):
     """Retrieve user information from the database."""
     try:
-        conn = chat_history_pool.getconn()
+        conn = psycopg2.connect(
+            host=chat_history_db_config['host'],
+            port=chat_history_db_config['port'],
+            dbname=chat_history_db_config['dbname'],
+            user=chat_history_db_config['user'],
+            password=chat_history_db_config['password'],
+            sslmode='require'
+        )
         cursor = conn.cursor()
         cursor.execute("SELECT username, password_hash FROM users WHERE username = %s", (username,))
         user = cursor.fetchone()
         cursor.close()
-        chat_history_pool.putconn(conn)
+        conn.close()
         if user:
             return {'username': user[0], 'password': user[1]}
         return None
@@ -309,7 +286,14 @@ def get_database_schema():
     """Retrieve table and column names from the sabre_db1 PostgreSQL database."""
     logging.debug("Attempting to retrieve database schema from sabre_db1")
     try:
-        conn = sabre_db_pool.getconn()
+        conn = psycopg2.connect(
+            host=sabre_db_config['host'],
+            port=sabre_db_config['port'],
+            dbname=sabre_db_config['dbname'],
+            user=sabre_db_config['user'],
+            password=sabre_db_config['password'],
+            sslmode='require'
+        )
         cursor = conn.cursor()
         cursor.execute("""
             SELECT table_name, column_name
@@ -318,7 +302,7 @@ def get_database_schema():
         """)
         schema = cursor.fetchall()
         cursor.close()
-        sabre_db_pool.putconn(conn)
+        conn.close()
 
         schema_dict = {}
         for table, column in schema:
@@ -351,47 +335,6 @@ def get_serializable_messages(messages):
         }
         serializable_messages.append(serializable_msg)
     return serializable_messages
-
-
-def generate_response_for_edit(chat_index, message_index):
-    """Generates a response for an edited prompt starting from generate_response workflow."""
-    chat_session = conversation_history[chat_index]
-    messages = chat_session['messages']
-
-    # Extract the updated prompt
-    prompt = messages[message_index]["content"]
-    logging.info("Processing edited prompt in generate_response_for_edit: %s", prompt)
-
-    # Remove any messages after the edited prompt (if any)
-    del messages[message_index + 1:]
-
-    schema = get_database_schema()
-    if not schema:
-        logging.error("Failed to retrieve database schema from sabre_db1")
-        return jsonify({'error': 'Failed to retrieve database schema'}), 500
-
-    formatted_schema = format_schema_for_gpt(schema)
-
-    # Determine if new data is needed based on the current prompt
-    requires_data = requires_more_data(prompt, messages)
-    logging.info("Determined that new data is %s for the prompt", "required" if requires_data else "not required")
-
-    # Determine if the new prompt is related to previous prompts
-    previous_prompts = [msg['content'] for msg in messages if msg['role'] == 'user' and msg['content'] != prompt]
-    is_related = is_related_to_previous_prompt(prompt, previous_prompts)
-    logging.info("Determined that edited prompt is %s to previous prompts", "related" if is_related else "not related")
-
-    response = process_data_and_generate_response(chat_session, prompt, formatted_schema, messages, requires_data, is_related)
-    return response
-
-def is_incomplete_prompt(prompt):
-    # Example rule-based logic (you can customize this)
-    if len(prompt.strip()) == 0:
-        return True
-    # Additional checks can be added here
-    return False
-
-
 
 def clarify_prompt(prompt, messages):
     """
@@ -649,9 +592,9 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
     # Create the base system message with instructions and schema
     system_prompt = (
         "As a SQL expert, generate a safe, read-only SQL query based on the user's prompt and the provided database schema. "
-        "generate correct syntax of query and only return sql query in response"
+        "Generate correct syntax of query and only return SQL query in response. "
         "Determine what data is needed to answer the prompt. The query should fetch necessary data for analysis. "
-        "Generate query in this way that if some names column are present in that table then they are must extracted. "
+        "Generate query in this way that if some names columns are present in that table then they must be extracted. "
         "If the effective date is greater than the ship date, then orders are late; if the effective date is less than or equal to the ship date, then it's on time. "
         "Ensure the query is syntactically correct and optimized. Do not ask for clarification.\n\n"
         "Database Schema:\n" + schema
@@ -768,7 +711,14 @@ def execute_sql_query(sql_query):
         return None, "Unsafe SQL query detected."
 
     try:
-        conn = sabre_db_pool.getconn()
+        conn = psycopg2.connect(
+            host=sabre_db_config['host'],
+            port=sabre_db_config['port'],
+            dbname=sabre_db_config['dbname'],
+            user=sabre_db_config['user'],
+            password=sabre_db_config['password'],
+            sslmode='require'
+        )
         cursor = conn.cursor()
         cursor.execute(sql_query)
         logging.info("SQL query executed successfully")
@@ -777,7 +727,7 @@ def execute_sql_query(sql_query):
         results = cursor.fetchmany(1000)  # Fetch up to 1000 rows
         colnames = [desc[0] for desc in cursor.description]
         cursor.close()
-        sabre_db_pool.putconn(conn)
+        conn.close()
 
         logging.debug("Number of rows fetched: %d", len(results))
         data = [dict(zip(colnames, row)) for row in results] if results else []
@@ -873,7 +823,14 @@ def generate_final_response(prompt, db_data, messages=None):
 def save_interaction_to_db(user_input, bot_response, sql_query=None, data=None):
     """Save the user input and bot response to the chat_history database."""
     try:
-        conn = chat_history_pool.getconn()
+        conn = psycopg2.connect(
+            host=chat_history_db_config['host'],
+            port=chat_history_db_config['port'],
+            dbname=chat_history_db_config['dbname'],
+            user=chat_history_db_config['user'],
+            password=chat_history_db_config['password'],
+            sslmode='require'
+        )
         cursor = conn.cursor()
 
         # Insert into chats table
@@ -905,7 +862,7 @@ def save_interaction_to_db(user_input, bot_response, sql_query=None, data=None):
         logging.error("Error saving interaction to chat_history database: %s", e)
     finally:
         cursor.close()
-        chat_history_pool.putconn(conn)
+        conn.close()
 
 def requires_more_data(prompt, messages=None):
     """Determine if the prompt requires more data from the database."""
