@@ -3,18 +3,18 @@
    "secret_key": "eoxs12345",
   "database": {
     "sabre_db1": {
-      "host": "144.126.136.193",
+      "host": "38.183.54.245",
       "dbname": "sabre_db1",
       "user": "test",
       "password": "test",
       "port": 5432
     },
     "chat_history": {
-      "host": "144.126.136.193",
+      "host": "38.183.54.245",
       "port": 5432,
       "dbname": "chat_history",
       "user": "postgres",
-      "password": "test"
+      "password": "harneet@2002"
     }
   }
 }
