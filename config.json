@@ -1,6 +1,6 @@
 {
-  "openai_api_key": "sk-RzKwxKcJppgD5L5u9_vk-OgBLYxnezrtkenEASG5FIT3BlbkFJZ03NKmdRXQNG1QZhK4lLk_zBU_-fwKGnp9WLIepqgA",
-   "secret_key": "eoxs12345",
+  "openai_api_key": "sk-0WlJcRrvAl7hx2G-3a1Vkck4QBToXP0pIm70PfzsdFT3BlbkFJh1ekF1ckMvH9CZ_iDKwypnnsTI258z0A-JuQHQ1xMA",
+   "secret_key": "your_random_secret_key_here",
   "database": {
     "sabre_db1": {
       "host": "144.126.136.193",
@@ -13,8 +13,8 @@
       "host": "144.126.136.193",
       "port": 5432,
       "dbname": "chat_history",
-      "user": "test",
-      "password": "test"
+      "user": "postgres",
+      "password": "new_password"
     }
   }
 }
