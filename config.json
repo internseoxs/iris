@@ -3,7 +3,7 @@
    "secret_key": "eoxs12345",
   "database": {
     "sabre_db1": {
-      "host": "38.183.54.245",
+      "host": "144.126.136.193",
       "dbname": "sabre_db1",
       "user": "test",
       "password": "test",
