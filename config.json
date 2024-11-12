@@ -1,5 +1,5 @@
 {
-  "openai_api_key": "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",
+  "openai_api_key": "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",
    "secret_key": "your_random_secret_key_here",
   "database": {
     "sabre_db1": {
