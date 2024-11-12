@@ -10,11 +10,11 @@
       "port": 5432
     },
     "chat_history": {
-      "host": "38.183.54.245",
+      "host": "144.126.136.193",
       "port": 5432,
       "dbname": "chat_history",
-      "user": "postgres",
-      "password": "harneet@2002"
+      "user": "test",
+      "password": "test"
     }
   }
 }
