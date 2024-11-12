@@ -24,7 +24,7 @@ with open('config.json', 'r') as config_file:
     config = json.load(config_file)
 
 # Load OpenAI API key from config
-openai.api_key = config.get('openai_api_key') 
+openai.api_key = os.getenv('OPENAI_API_KEY')
 if not openai.api_key:
     logging.error('OpenAI API key is missing in the configuration or environment variables')
     raise ValueError('OpenAI API key is missing in configuration or environment variables')
