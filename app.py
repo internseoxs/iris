@@ -23,11 +23,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 with open('config.json', 'r') as config_file:
     config = json.load(config_file)
 
-# Set OpenAI API key from environment variables
-openai.api_key = os.getenv('OPENAI_API_KEY')
+# Load OpenAI API key from config
+openai.api_key = config.get('openai_api_key') 
 if not openai.api_key:
-    logging.error('OpenAI API key is missing in the environment variables')
-    raise ValueError('OpenAI API key is missing in environment variables')
+    logging.error('OpenAI API key is missing in the configuration or environment variables')
+    raise ValueError('OpenAI API key is missing in configuration or environment variables')
 
 # Secret key for Flask (used for sessions)
 app.secret_key = config.get('secret_key')
