@@ -3,9 +3,9 @@
   "database": {
     "sabre_db1": {
       "host": "144.126.136.193",
-      "dbname": "sabre_db1",
-      "user": "test",
-      "password": "test",
+      "dbname": "sabre_nov",
+      "user": "postgres",
+      "password": "new_password",
       "port": 5432
     },
     "chat_history": {
