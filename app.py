@@ -12,7 +12,7 @@ import os
 import uuid  # For generating unique chat IDs
 from functools import wraps
 
-app = Flask(_name_)  # Fixed Flask app initialization
+app = Flask(__name__)  # Fixed Flask app initialization
 
 # Initialize conversation history
 conversation_history = []
@@ -25,7 +25,7 @@ with open('config.json', 'r') as config_file:
     config = json.load(config_file)
 
 # Set OpenAI API key from config file
-openai_api_key = config.get('openai_api_key')
+openai_api_key = os.getenv('openai_api_key')
 if not openai_api_key:
     logging.error('OpenAI API key is missing in the configuration file')
     raise ValueError('OpenAI API key is missing in the configuration file')
@@ -160,7 +160,7 @@ def home():
 @login_required
 def index():
     logging.info("Rendering index page")
-    return render_template("test1.html")
+    return render_template("index.html")
 
 def get_database_schema():
     """Retrieve table and column names from the sabre_db1 PostgreSQL database."""
@@ -979,5 +979,5 @@ def ensure_semicolon(sql_query):
         return sql_query + ';' if not sql_query.endswith(';') else sql_query
     return sql_query
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(debug=True)
