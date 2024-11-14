@@ -814,7 +814,7 @@ def generate_final_response(prompt, db_data, messages=None):
             response = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 messages=temp_messages,
-                max_tokens=80000,
+                max_tokens=8000,
                 temperature=0.0,
                 n=1,
             )
