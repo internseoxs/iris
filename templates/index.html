@@ -6,691 +6,664 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chat with GPT and Database</title>
     <!-- Include CSS content here -->
-  <style>
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
+    <style>
+    /* Existing styles */
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
 
-body {
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-    line-height: 1.6;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    transition: background-color 0.3s, color 0.3s;
+    body {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        line-height: 1.6;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        transition: background-color 0.3s, color 0.3s;
+    }
+    .loading-message {
+        font-style: italic;
+        color: gray;
+        text-align: center;
+        margin: 10px 0;
+    }
 
-}
-.loading-message {
-            font-style: italic;
-            color: gray;
-            text-align: center;
-            margin: 10px 0;
-        }
+    /* Day Mode */
+    body.day-mode {
+        background-color: #f7f7f8;
+        color: #333;
+    }
 
-/* Day Mode */
-body.day-mode {
-    background-color: #f7f7f8;
-    color: #333;
-}
+    /* Night Mode */
+    body.night-mode {
+        background-color: #2e2e2e;
+        color: #ffffff;
+    }
 
-/* Night Mode */
-body.night-mode {
-    background-color: #2e2e2e;
-    color: #ffffff;
-}
+    header {
+        background-color: #d3d3d3;
+        color: #000000;
+        padding: 10px 0;
+        text-align: center;
+        position: relative;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
 
-header {
-    background-color: #d3d3d3;
-    color: #000000;
-    padding: 10px 0;
-    text-align: center;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-
-}
-
-header h1 {
-    font-size: 1.5rem;
-    letter-spacing: 1px;
-
-}
-
-.main-container {
-    display: flex;
-    flex-grow: 1;
-    max-width: 1200px;
-    margin: 0 auto;
-    width: 100%;
-
-}
-
-.chat-history {
-    width: 250px;
-    background-color: #d3d3d3;
-    color: #000000;
-    padding: 20px;
-    overflow-y: auto;
-    position: fixed;
-    left: 0;
-    top: 61px;
-    bottom: 0;
-}
-.chat-history h3 {
-            font-size: 1.4rem;
-            margin-bottom: 10px;
-        }
-
-        .chat-item {
-    display: flex;
-    justify-content: space-between; /* Space between title/timestamp and delete button */
-    align-items: center; /* Vertically center items */
-    padding: 10px;
-    border-bottom: 1px solid #ddd; /* Optional: Add a separator between chat items */
-}
-
-        .chat-item:hover {
-            background-color: #565a6b;
-        }
-
-        .chat-item.active {
-            background-color: #10a37f;
-        }
-
-        .timestamp {
-    font-size: 0.8em; /* Decrease font size for the timestamp */
-    color: black; /* Optional: Change color for visibility */
-    margin-left: 5px; /* Optional: Space between title and timestamp */
-}
-
-
-.container {
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-    padding: 20px;
-    margin-left: 250px;
-    overflow: hidden;
-    height: 100vh;
-}
-
-h2 {
-    font-size: 1.5rem;
-    color: #343541;
-    margin-bottom: 15px;
-}
-
-#chat-container {
-    flex-grow: 1;
-    margin-top: 10px;
-    overflow-y: auto;
-    padding: 20px;
-    border-radius: 10px;
-    background-color: #fff;
-    border: 1px solid #e1e1e1;
-}
-
-
-.message {
-            display: block;
-            margin-bottom: 10px;
-            font-size: 1rem;
-            opacity: 0;
-            animation: slideIn 0.5s forwards;
-            position: relative;
-        }
-        .delete-button {
-    background: none; /* No background for the button */
-    border: none; /* Remove border */
-    cursor: pointer; /* Change  cursor to pointer */
-    color: red; /* Optional: Change color for visibility */
-    font-size: 1.2em; /* Increase size of the delete icon */
-}
-
-.delete-button:hover {
-    color: darkred; /* Darker color on hover */
-}
-
-        .user-message {
-            text-align: right;
-            color: #10a37f;
-            font-weight: 500;
-        }
-
-        .bot-response {
-            text-align: left;
-            color: #343541;
-            margin-top: 10px;
-            font-weight: bold;
-        }
-
-        .message-wrapper {
-            position: relative; /* Allows positioning of child elements */
-            display: flex; /* Use flexbox to align items */
-            align-items: center; /* Vertically center the button and message */
-        }
-
-        .edit-button {
-            margin-right: 10px; /* Add some space between the button and message */
-            background: transparent;
-            border: none;
-            color: #007bff;
-            cursor: pointer;
-            font-size: 16px; /* Change size as needed */
-        }
-.input-container {
-    display: flex;
-    padding: 10px 0;
-    background-color: #f7f7f8;
-    border-top: 1px solid #dcdcdc;
-    position: sticky;
-    bottom: 0;
-}
-
-.input-container textarea {
-    flex-grow: 1;
-    resize: none;
-    padding: 6px;
-    border: 1px solid #dcdcdc;
-    border-radius: 10px;
-    font-size: 1rem;
-    margin-right: 10px;
-}
-
-.input-container button {
-    background-color: #10a37f;
-    color: white;
-    border: none;
-    padding: 1px 20px;
-    font-size: 1rem;
-    border-radius: 10px;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-    margin-left: 5px;
-}
-
-.input-container button:hover {
-    background-color: #0e8f6d;
-}
-
-.new-chat-button {
-    background-color: #f44336;
-    padding: 1px 20px;
-    font-size: 1rem;
-    color: white;
-    border-radius: 5px;
-    margin-left: 5px;
-}
-
-.new-chat-button:hover {
-    background-color: #d32f2f;
-}
-
-/* Toggle switch styles */
-.toggle-container {
-    display: flex;
-    align-items: center;
-    margin: 10px 0;
-}
-
-.toggle-label {
-    margin-left: 10px;
-    font-weight: bold;
-    color: #333;
-}
-
-.toggle-switch {
-    width: 60px;
-    height: 30px;
-    background-color: #ccc;
-    border-radius: 15px;
-    position: relative;
-    cursor: pointer;
-    transition: background-color 0.3s;
-}
-
-.toggle-switch.active {
-    background-color: #10a37f;
-}
-
-.toggle-knob {
-    width: 26px;
-    height: 26px;
-    background-color: white;
-    border-radius: 50%;
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    transition: left 0.3s;
-}
-
-.toggle-switch.active .toggle-knob {
-    left: 32px;
-}
-
-/* Loading spinner styles */
-.loading-spinner {
-    position: absolute;
-    top: 50%;
-    left: 57%;
-    transform: translate(-50%, -50%);
-    width: 40px;
-    height: 40px;
-    border: 4px solid #10a37f;
-    border-top: 4px solid transparent;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    display: none;
-    z-index: 10;
-}
-
-@media (max-width: 768px) {
     header h1 {
-        font-size: 1.3rem;
+        font-size: 1.5rem;
+        letter-spacing: 1px;
     }
 
-    .container {
-        padding: 10px;
+    .logout-button {
+        position: absolute;
+        top: 15px;
+        right: 20px;
+        background-color: #f44336;
+        color: white;
+        padding: 5px 10px;
+        text-decoration: none;
+        border-radius: 5px;
     }
 
-    .input-container textarea {
-        padding: 8px;
+    .logout-button:hover {
+        background-color: #d32f2f;
     }
 
-    .input-container button {
-        padding: 3px 12px;
+    .main-container {
+        display: flex;
+        flex-grow: 1;
+        max-width: 1200px;
+        margin: 0 auto;
+        width: 100%;
     }
 
     .chat-history {
-        position: static;
-        width: 100%;
-        height: auto;
-        overflow-y: visible;
+        width: 250px;
+        background-color: #d3d3d3;
+        color: #000000;
+        padding: 20px;
+        overflow-y: auto;
+        position: fixed;
+        left: 0;
+        top: 61px;
+        bottom: 0;
+    }
+    .chat-history h3 {
+        font-size: 1.4rem;
+        margin-bottom: 10px;
+    }
+
+    .chat-item {
+        display: flex;
+        justify-content: space-between; /* Space between title/timestamp and delete button */
+        align-items: center; /* Vertically center items */
+        padding: 10px;
+        border-bottom: 1px solid #ddd; /* Optional: Add a separator between chat items */
+    }
+
+    .chat-item:hover {
+        background-color: #565a6b;
+    }
+
+    .chat-item.active {
+        background-color: #10a37f;
+    }
+
+    .timestamp {
+        font-size: 0.8em; /* Decrease font size for the timestamp */
+        color: black; /* Optional: Change color for visibility */
+        margin-left: 5px; /* Optional: Space between title and timestamp */
     }
 
     .container {
-        width: 100%;
-        margin-left: 0;
+        display: flex;
+        flex-direction: column;
+        flex-grow: 1;
+        padding: 20px;
+        margin-left: 250px;
+        overflow: hidden;
+        height: 100vh;
+    }
+
+    h2 {
+        font-size: 1.5rem;
+        color: #343541;
+        margin-bottom: 15px;
     }
 
     #chat-container {
-        padding: 15px;
+        flex-grow: 1;
+        margin-top: 10px;
+        overflow-y: auto;
+        padding: 20px;
+        border-radius: 10px;
+        background-color: #fff;
+        border: 1px solid #e1e1e1;
     }
-}
 
-/* Keyframe animations */
-@keyframes fadeIn {
-    from {
+    .message {
+        display: block;
+        margin-bottom: 10px;
+        font-size: 1rem;
         opacity: 0;
+        animation: slideIn 0.5s forwards;
+        position: relative;
     }
-    to {
-        opacity: 1;
+    .delete-button {
+        background: none; /* No background for the button */
+        border: none; /* Remove border */
+        cursor: pointer; /* Change  cursor to pointer */
+        color: red; /* Optional: Change color for visibility */
+        font-size: 1.2em; /* Increase size of the delete icon */
     }
-}
 
-@keyframes slideIn {
-    from {
-        transform: translateY(20px);
-        opacity: 0;
+    .delete-button:hover {
+        color: darkred; /* Darker color on hover */
     }
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
-}
 
-@keyframes spin {
-    from {
-        transform: rotate(0deg);
+    .user-message {
+        text-align: right;
+        color: #10a37f;
+        font-weight: 500;
     }
-    to {
-        transform: rotate(360deg);
+
+    .bot-response {
+        text-align: left;
+        color: #343541;
+        margin-top: 10px;
+        font-weight: bold;
     }
-}
-</style>
+
+    .message-wrapper {
+        position: relative; /* Allows positioning of child elements */
+        display: flex; /* Use flexbox to align items */
+        align-items: center; /* Vertically center the button and message */
+    }
+
+    .edit-button {
+        margin-right: 10px; /* Add some space between the button and message */
+        background: transparent;
+        border: none;
+        color: #007bff;
+        cursor: pointer;
+        font-size: 16px; /* Change size as needed */
+    }
+    .input-container {
+        display: flex;
+        padding: 10px 0;
+        background-color: #f7f7f8;
+        border-top: 1px solid #dcdcdc;
+        position: sticky;
+        bottom: 0;
+    }
+
+    .input-container textarea {
+        flex-grow: 1;
+        resize: none;
+        padding: 6px;
+        border: 1px solid #dcdcdc;
+        border-radius: 10px;
+        font-size: 1rem;
+        margin-right: 10px;
+    }
+
+    .input-container button {
+        background-color: #10a37f;
+        color: white;
+        border: none;
+        padding: 1px 20px;
+        font-size: 1rem;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+        margin-left: 5px;
+    }
+
+    .input-container button:hover {
+        background-color: #0e8f6d;
+    }
+
+    .new-chat-button {
+        background-color: #f44336;
+        padding: 1px 20px;
+        font-size: 1rem;
+        color: white;
+        border-radius: 5px;
+        margin-left: 5px;
+    }
+
+    .new-chat-button:hover {
+        background-color: #d32f2f;
+    }
+
+    /* Toggle switch styles */
+    .toggle-container {
+        display: flex;
+        align-items: center;
+        margin: 10px 0;
+    }
+
+    .toggle-label {
+        margin-left: 10px;
+        font-weight: bold;
+        color: #333;
+    }
+
+    .toggle-switch {
+        width: 60px;
+        height: 30px;
+        background-color: #ccc;
+        border-radius: 15px;
+        position: relative;
+        cursor: pointer;
+        transition: background-color 0.3s;
+    }
+
+    .toggle-switch.active {
+        background-color: #10a37f;
+    }
+
+    .toggle-knob {
+        width: 26px;
+        height: 26px;
+        background-color: white;
+        border-radius: 50%;
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        transition: left 0.3s;
+    }
+
+    .toggle-switch.active .toggle-knob {
+        left: 32px;
+    }
+
+    /* Loading spinner styles */
+    .loading-spinner {
+        position: absolute;
+        top: 50%;
+        left: 57%;
+        transform: translate(-50%, -50%);
+        width: 40px;
+        height: 40px;
+        border: 4px solid #10a37f;
+        border-top: 4px solid transparent;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        display: none;
+        z-index: 10;
+    }
+
+    @media (max-width: 768px) {
+        header h1 {
+            font-size: 1.3rem;
+        }
+
+        .container {
+            padding: 10px;
+        }
+
+        .input-container textarea {
+            padding: 8px;
+        }
+
+        .input-container button {
+            padding: 3px 12px;
+        }
+
+        .chat-history {
+            position: static;
+            width: 100%;
+            height: auto;
+            overflow-y: visible;
+        }
+
+        .container {
+            width: 100%;
+            margin-left: 0;
+        }
+
+        #chat-container {
+            padding: 15px;
+        }
+    }
+
+    /* Keyframe animations */
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideIn {
+        from {
+            transform: translateY(20px);
+            opacity: 0;
+        }
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    @keyframes spin {
+        from {
+            transform: rotate(0deg);
+        }
+        to {
+            transform: rotate(360deg);
+        }
+    }
+    </style>
     <script>
+    /* Existing JavaScript code */
+    let chatHistory = [];
+    let currentChatIndex = null;
+    let recognizing = false;
+    let recognition;
+    let loadingInterval;
 
-        let chatHistory = [];
-        let currentChatIndex = null;
-        let recognizing = false;
-        let recognition;
-        let loadingInterval;
+    const loadingMessages = [
+        "Generating response...",
+        "Just a moment...",
+        "Thinking...",
+        "Processing your request...",
+        "Hang tight..."
+    ];
 
-        const loadingMessages = [
-            "Generating response...",
-            "Just a moment...",
-            "Thinking...",
-            "Processing your request...",
-            "Hang tight..."
-        ];
+    document.addEventListener("DOMContentLoaded", () => {
+        // Clear chat history on page load
+        chatHistory = [];
+        currentChatIndex = null;
 
-        document.addEventListener("DOMContentLoaded", () => {
-            // Clear chat history on page load
-            chatHistory = [];
-            currentChatIndex = null;
+        // Check if browser supports Web Speech API
+        if (!('webkitSpeechRecognition' in window)) {
+            alert("Speech recognition is not supported by this browser.");
+        } else {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
 
-            // Check if browser supports Web Speech API
-            if (!('webkitSpeechRecognition' in window)) {
-                alert("Speech recognition is not supported by this browser.");
-            } else {
-                recognition = new webkitSpeechRecognition();
-                recognition.continuous = false;
-                recognition.interimResults = false;
-                recognition.lang = 'en-US';
+            recognition.onstart = function() {
+                recognizing = true;
+                document.getElementById('micButton').classList.add('active');
+            };
 
-                recognition.onstart = function() {
-                    recognizing = true;
-                    document.getElementById('micButton').classList.add('active');
-                };
+            recognition.onend = function() {
+                recognizing = false;
+                document.getElementById('micButton').classList.remove('active');
+            };
 
-                recognition.onend = function() {
-                    recognizing = false;
-                    document.getElementById('micButton').classList.remove('active');
-                };
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                document.getElementById('prompt').value += transcript.trim();
+            };
+        }
+    });
 
-                recognition.onresult = function(event) {
-                    const transcript = event.results[0][0].transcript;
-                    document.getElementById('prompt').value += transcript.trim();
-                };
+    function startRecognition() {
+        if (recognizing) {
+            recognition.stop();
+            return;
+        }
+        recognition.start();
+    }
+
+    function renderChatList() {
+        const chatListContainer = document.querySelector('.chat-history');
+        chatListContainer.innerHTML = '<h3>Chat History</h3>';
+
+        chatHistory.forEach((chatSession, index) => {
+            const chatItem = document.createElement('div');
+            chatItem.classList.add('chat-item');
+            if (index === currentChatIndex) {
+                chatItem.classList.add('active');
             }
+
+            const firstUserMessage = chatSession.messages.find(msg => msg.role === 'user');
+            const title = firstUserMessage ? extractFirstWords(firstUserMessage.content, 5) : 'New Chat';
+            chatItem.innerText = title;
+
+            chatItem.onclick = () => {
+                currentChatIndex = index;
+                renderChatList();
+                loadChatHistory(index);
+            };
+
+            chatListContainer.appendChild(chatItem);
+        });
+    }
+
+    function renderChatHistory() {
+        const chatContainer = document.getElementById('chat-container');
+        chatContainer.innerHTML = '';
+
+        const messages = chatHistory[currentChatIndex]?.messages || [];
+        messages.forEach((message, messageIndex) => {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', message.role === 'user' ? 'user-message' : 'bot-response');
+
+            // Create a wrapper for the message and the edit button
+            const messageWrapper = document.createElement('div');
+            messageWrapper.classList.add('message-wrapper');
+
+            if (message.role === 'user') {
+                const editButton = document.createElement('button');
+                editButton.innerText = '✏';
+                editButton.classList.add('edit-button');
+                editButton.onclick = () => editPrompt(currentChatIndex, messageIndex);
+
+                // Append the edit button to the wrapper
+                messageWrapper.appendChild(editButton);
+            }
+
+            // Add the message content to the wrapper
+            const messageContent = document.createElement('span');
+            messageContent.innerText = message.content;
+            messageWrapper.appendChild(messageContent);
+
+            // Append the wrapper to the message element
+            messageElement.appendChild(messageWrapper);
+
+            chatContainer.appendChild(messageElement);
         });
 
-        function startRecognition() {
-            if (recognizing) {
-                recognition.stop();
-                return;
-            }
-            recognition.start();
-        }
-
-        function renderChatList() {
-            const chatListContainer = document.querySelector('.chat-history');
-            chatListContainer.innerHTML = '<h3>Chat History</h3>';
-
-            chatHistory.forEach((chatSession, index) => {
-                const chatItem = document.createElement('div');
-                chatItem.classList.add('chat-item');
-                if (index === currentChatIndex) {
-                    chatItem.classList.add('active');
-                }
-
-                const firstUserMessage = chatSession.messages.find(msg => msg.role === 'user');
-                const title = firstUserMessage ? extractFirstWords(firstUserMessage.content, 5) : 'New Chat';
-                chatItem.innerText = title;
-
-                chatItem.onclick = () => {
-                    currentChatIndex = index;
-                    renderChatList();
-                    loadChatHistory(index);
-                };
-
-                chatListContainer.appendChild(chatItem);
-            });
-        }
-
-        function renderChatHistory() {
-            const chatContainer = document.getElementById('chat-container');
-            chatContainer.innerHTML = '';
-
-            const messages = chatHistory[currentChatIndex]?.messages || [];
-            messages.forEach((message, messageIndex) => {
-                const messageElement = document.createElement('div');
-                messageElement.classList.add('message', message.role === 'user' ? 'user-message' : 'bot-response');
-
-                // Create a wrapper for the message and the edit button
-                const messageWrapper = document.createElement('div');
-                messageWrapper.classList.add('message-wrapper');
-
-                if (message.role === 'user') {
-                    const editButton = document.createElement('button');
-                    editButton.innerText = '✏';
-                    editButton.classList.add('edit-button');
-                    editButton.onclick = () => editPrompt(currentChatIndex, messageIndex);
-
-                    // Append the edit button to the wrapper
-                    messageWrapper.appendChild(editButton);
-                }
-
-                // Add the message content to the wrapper
-                const messageContent = document.createElement('span');
-                messageContent.innerText = message.content;
-                messageWrapper.appendChild(messageContent);
-
-                // Append the wrapper to the message element
-                messageElement.appendChild(messageWrapper);
-
-                chatContainer.appendChild(messageElement);
-            });
-
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
-
-        function editPrompt(chatIndex, messageIndex) {
-    const chatSession = chatHistory[chatIndex];
-    
-    // Ensure the chat session and message exist
-    if (!chatSession || !chatSession.messages[messageIndex]) {
-        console.error("Invalid chat or message index for editing.");
-        alert("Cannot edit this message as it does not exist.");
-        return;  // Exit the function if the indices are invalid
+        chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
-    const prompt = chatSession.messages[messageIndex].content;
-    document.getElementById('prompt').value = prompt; // Load message content into the input field
-    document.getElementById('sendButton').style.display = 'none'; // Hide send button
-    document.getElementById('saveEditButton').style.display = 'inline'; // Show save edit button
-    document.getElementById('cancelEditButton').style.display = 'inline';
+    function editPrompt(chatIndex, messageIndex) {
+        const prompt = chatHistory[chatIndex].messages[messageIndex].content;
+        document.getElementById('prompt').value = prompt; // Load message content into the input field
+        document.getElementById('sendButton').style.display = 'none'; // Hide send button
+        document.getElementById('saveEditButton').style.display = 'inline'; // Show save edit button
+        document.getElementById('cancelEditButton').style.display = 'inline';
 
-    // Store the chat_id and indices for reference during save
-    window.currentEditChatId = chatSession.chat_id;
-    window.currentEditMessageIndex = messageIndex;
-}
-
-
-        function showLoadingMessage() {
-            const chatContainer = document.getElementById('chat-container');
-            const loadingMessageElement = document.createElement('div');
-            loadingMessageElement.classList.add('loading-message');
-            loadingMessageElement.innerText = loadingMessages[0];
-            chatContainer.appendChild(loadingMessageElement);
-
-            let messageIndex = 0;
-            loadingInterval = setInterval(() => {
-                messageIndex = (messageIndex + 1) % loadingMessages.length;
-                loadingMessageElement.innerText = loadingMessages[messageIndex];
-            }, 1000);
-        }
-
-        function hideLoadingMessage() {
-            const chatContainer = document.getElementById('chat-container');
-            const loadingMessageElement = chatContainer.querySelector('.loading-message');
-            if (loadingMessageElement) {
-                chatContainer.removeChild(loadingMessageElement);
-            }
-            clearInterval(loadingInterval);
-        }
-
-        function saveEditedPrompt() {
-    const newPrompt = document.getElementById('prompt').value.trim();
-
-    if (!newPrompt) return;
-
-    // Validate chat_id and message index
-    if (!window.currentEditChatId || window.currentEditMessageIndex == null) {
-        console.error("Invalid chat ID or message index for saving edited prompt.");
-        return;  // Exit if the indices are invalid
+        // Store the indices for reference during save
+        window.currentEditChatIndex = chatIndex;
+        window.currentEditMessageIndex = messageIndex;
     }
 
-    // Show loading message
-    showLoadingMessage();
+    function showLoadingMessage() {
+        const chatContainer = document.getElementById('chat-container');
+        const loadingMessageElement = document.createElement('div');
+        loadingMessageElement.classList.add('loading-message');
+        loadingMessageElement.innerText = loadingMessages[0];
+        chatContainer.appendChild(loadingMessageElement);
 
-    // Clear input
-    document.getElementById('prompt').value = '';
+        let messageIndex = 0;
+        loadingInterval = setInterval(() => {
+            messageIndex = (messageIndex + 1) % loadingMessages.length;
+            loadingMessageElement.innerText = loadingMessages[messageIndex];
+        }, 1000);
+    }
 
-    // Call the backend to save the updated prompt using chat_id
-    fetch('/edit-prompt', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            chat_id: window.currentEditChatId,
-            message_index: window.currentEditMessageIndex,
-            content: newPrompt
-        }),
-    })
-    .then(response => response.json())
-    .then(data => {
-        // Hide loading message
-        hideLoadingMessage();
-
-        if (!data.error) {
-            // Update the local chat history and re-render
-            let chatSession = chatHistory.find(chat => chat.chat_id === window.currentEditChatId);
-            chatSession.messages[window.currentEditMessageIndex].content = newPrompt;
-            if (chatSession.messages[window.currentEditMessageIndex + 1]?.role === 'assistant') {
-                chatSession.messages.splice(window.currentEditMessageIndex + 1, 1);
-            }
-            chatSession.messages.push({ role: 'assistant', content: data.response });
-            renderChatHistory();
-            document.getElementById('prompt').value = '';
-            document.getElementById('saveEditButton').style.display = 'none';
-            document.getElementById('cancelEditButton').style.display = 'none';
-            document.getElementById('sendButton').style.display = 'inline';
-        } else {
-            console.error('Failed to update prompt:', data.error);
+    function hideLoadingMessage() {
+        const chatContainer = document.getElementById('chat-container');
+        const loadingMessageElement = chatContainer.querySelector('.loading-message');
+        if (loadingMessageElement) {
+            chatContainer.removeChild(loadingMessageElement);
         }
-    })
-    .catch(error => {
-        console.error('Error updating prompt:', error);
-        hideLoadingMessage();
-    });
-}
+        clearInterval(loadingInterval);
+    }
 
-            
-             
+    function saveEditedPrompt() {
+        const newPrompt = document.getElementById('prompt').value.trim();
 
-        function cancelEdit() {
-            document.getElementById('prompt').value = ''; // Clear input
-            document.getElementById('saveEditButton').style.display = 'none';
-            document.getElementById('cancelEditButton').style.display = 'none';
-            document.getElementById('sendButton').style.display = 'inline'; // Show send button again
-        }
+        if (!newPrompt) return;
 
-        function extractFirstWords(text, wordCount) {
-            // Split the text into words and return the first 'wordCount' words
-            let words = text.trim().split(/\s+/);  // Split by whitespace
-            return words.slice(0, wordCount).join(' ') + '...';  // Join the first 'wordCount' words
-        }
+        // Show loading message
+        showLoadingMessage();
 
-        function loadChatHistory(index) {
-            if (index < 0 || index >= chatHistory.length) return;  // Validate index
+        // Clear input
+        document.getElementById('prompt').value = '';
 
-            currentChatIndex = index;
-            renderChatList();
-            renderChatHistory();
-        }
+        // Call the backend to save the updated prompt
+        fetch('/edit-prompt', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                chat_index: window.currentEditChatIndex,
+                message_index: window.currentEditMessageIndex,
+                content: newPrompt
+            }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Hide loading message
+            hideLoadingMessage();
 
-        function sendPrompt() {
-            const prompt = document.getElementById('prompt').value.trim();
-
-            if (!prompt) return;
-
-            // Show loading message
-            showLoadingMessage();
-
-            document.getElementById('prompt').value = '';
-
-            fetch('/generate-response', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ prompt }),
-            })
-            .then(response => response.json())
-            .then(data => {
-                // Hide loading message
-                hideLoadingMessage();
-
-                // Add to chat history
-                if (currentChatIndex !== null && currentChatIndex < chatHistory.length) {
-                    chatHistory[currentChatIndex].messages.push({ role: 'user', content: prompt });
-                    chatHistory[currentChatIndex].messages.push({ role: 'assistant', content: data.response });
-                } else {
-                    const newChat = {
-                        messages: [
-                            { role: 'user', content: prompt },
-                            { role: 'assistant', content: data.response }
-                        ]
-                    };
-                    chatHistory.push(newChat);
-                    currentChatIndex = chatHistory.length - 1;
-                    renderChatList(); // Update chat history UI
+            if (!data.error) {
+                // Update the local chat history and re-render
+                let messages = chatHistory[window.currentEditChatIndex].messages;
+                messages[window.currentEditMessageIndex].content = newPrompt;
+                // Remove old assistant response
+                if (messages[window.currentEditMessageIndex + 1] && messages[window.currentEditMessageIndex + 1].role === 'assistant') {
+                    messages.splice(window.currentEditMessageIndex + 1, 1);
                 }
-
+                // Append new assistant response
+                messages.push({ role: 'assistant', content: data.response });
                 renderChatHistory();
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                // Hide loading message
-                hideLoadingMessage();
-                alert('An error occurred while processing your request.');
-            });
-        }
-
-        function newChat() {
-    // Add a new chat session in the frontend
-    currentChatIndex = chatHistory.length;
-    chatHistory.push({ messages: [], chat_id: null });
-    document.getElementById('chat-container').innerHTML = '';
-    renderChatList();
-    renderChatHistory();
-
-    // Send a request to the backend to initialize a new chat session
-    fetch('/new-chat', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            console.error('Error initializing new chat session:', data.error);
-        } else {
-            // Store the backend chat_id in the frontend chat session
-            chatHistory[currentChatIndex].chat_id = data.chat_id;
-        }
-    })
-    .catch(error => {
-        console.error('Error initializing new chat session:', error);
-    });
-}
-
-        
-
-        function toggleTheme() {
-            const body = document.body;
-            const toggleSwitch = document.querySelector('.toggle-switch');
-
-            if (body.classList.contains('day-mode')) {
-                body.classList.remove('day-mode');
-                body.classList.add('night-mode');
-                toggleSwitch.classList.add('active');
-                localStorage.setItem('theme', 'night'); // Save theme to local storage
+                document.getElementById('prompt').value = '';
+                document.getElementById('saveEditButton').style.display = 'none';
+                document.getElementById('cancelEditButton').style.display = 'none';
+                document.getElementById('sendButton').style.display = 'inline'; // Show send button again
             } else {
-                body.classList.remove('night-mode');
-                body.classList.add('day-mode');
-                toggleSwitch.classList.remove('active');
-                localStorage.setItem('theme', 'day'); // Save theme to local storage
+                console.error('Failed to update prompt:', data.error);
             }
+        })
+        .catch(error => {
+            console.error('Error updating prompt:', error);
+            // Hide loading message
+            hideLoadingMessage();
+        });
+    }
+
+    function cancelEdit() {
+        document.getElementById('prompt').value = ''; // Clear input
+        document.getElementById('saveEditButton').style.display = 'none';
+        document.getElementById('cancelEditButton').style.display = 'none';
+        document.getElementById('sendButton').style.display = 'inline'; // Show send button again
+    }
+
+    function extractFirstWords(text, wordCount) {
+        // Split the text into words and return the first 'wordCount' words
+        let words = text.trim().split(/\s+/);  // Split by whitespace
+        return words.slice(0, wordCount).join(' ') + '...';  // Join the first 'wordCount' words
+    }
+
+    function loadChatHistory(index) {
+        if (index < 0 || index >= chatHistory.length) return;  // Validate index
+
+        currentChatIndex = index;
+        renderChatList();
+        renderChatHistory();
+    }
+
+    function sendPrompt() {
+        const prompt = document.getElementById('prompt').value.trim();
+
+        if (!prompt) return;
+
+        // Show loading message
+        showLoadingMessage();
+
+        document.getElementById('prompt').value = '';
+
+        fetch('/generate-response', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ prompt }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Hide loading message
+            hideLoadingMessage();
+
+            // Add to chat history
+            if (currentChatIndex !== null && currentChatIndex < chatHistory.length) {
+                chatHistory[currentChatIndex].messages.push({ role: 'user', content: prompt });
+                chatHistory[currentChatIndex].messages.push({ role: 'assistant', content: data.response });
+            } else {
+                const newChat = {
+                    messages: [
+                        { role: 'user', content: prompt },
+                        { role: 'assistant', content: data.response }
+                    ]
+                };
+                chatHistory.push(newChat);
+                currentChatIndex = chatHistory.length - 1;
+                renderChatList(); // Update chat history UI
+            }
+
+            renderChatHistory();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            // Hide loading message
+            hideLoadingMessage();
+            alert('An error occurred while processing your request.');
+        });
+    }
+
+    function newChat() {
+        currentChatIndex = chatHistory.length;
+        chatHistory.push({ messages: [] });
+        document.getElementById('chat-container').innerHTML = '';
+        renderChatList();
+        renderChatHistory();
+    }
+
+    function toggleTheme() {
+        const body = document.body;
+        const toggleSwitch = document.querySelector('.toggle-switch');
+
+        if (body.classList.contains('day-mode')) {
+            body.classList.remove('day-mode');
+            body.classList.add('night-mode');
+            toggleSwitch.classList.add('active');
+            localStorage.setItem('theme', 'night'); // Save theme to local storage
+        } else {
+            body.classList.remove('night-mode');
+            body.classList.add('day-mode');
+            toggleSwitch.classList.remove('active');
+            localStorage.setItem('theme', 'day'); // Save theme to local storage
         }
+    }
     </script>
 </head>
 <body class="day-mode">
     <header>
         <h1>IRIS - Reporting on Steroids</h1>
+        <a href="/logout" class="logout-button">Logout</a>
     </header>
 
     <div class="main-container">
@@ -707,10 +680,10 @@ h2 {
 
             <div class="input-container">
                 <textarea id="prompt" rows="3" placeholder="Type your message..."></textarea>
-                <button onclick="sendPrompt()" id="sendButton">Send ↩ </button>
-                <button onclick="saveEditedPrompt()" id="saveEditButton" style="display: none;">Save Edit 💾 </button>
-                <button onclick="cancelEdit()" id="cancelEditButton" style="display: none;">Cancel Edit ✖ </button>
-                <button class="new-chat-button" onclick="newChat()">New ✒ </button>
+                <button onclick="sendPrompt()" id="sendButton">Send ↩</button>
+                <button onclick="saveEditedPrompt()" id="saveEditButton" style="display: none;">Save Edit 💾</button>
+                <button onclick="cancelEdit()" id="cancelEditButton" style="display: none;">Cancel Edit ✖</button>
+                <button class="new-chat-button" onclick="newChat()">New ✒</button>
                 <!-- Voice recognition button -->
                 <button class="mic-button" id="micButton" onclick="startRecognition()">Speak 🎤</button>
             </div>
@@ -724,3 +697,4 @@ h2 {
         </div>
     </div>
 </body>
+</html>
