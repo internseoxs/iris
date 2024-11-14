@@ -1,5 +1,4 @@
-
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 import openai
 import psycopg2
 from psycopg2 import pool  # For efficient database connection pooling
@@ -11,9 +10,9 @@ from datetime import datetime, date
 import logging
 import os
 import uuid  # For generating unique chat IDs
-from uuid import uuid4
+from functools import wraps
 
-app = Flask(__name__)  # Fixed Flask app initialization
+app = Flask(_name_)  # Fixed Flask app initialization
 
 # Initialize conversation history
 conversation_history = []
@@ -26,14 +25,17 @@ with open('config.json', 'r') as config_file:
     config = json.load(config_file)
 
 # Set OpenAI API key from config file
-openai_api_key = os.getenv('OPENAI_API_KEY')
+openai_api_key = config.get('openai_api_key')
 if not openai_api_key:
     logging.error('OpenAI API key is missing in the configuration file')
     raise ValueError('OpenAI API key is missing in the configuration file')
 openai.api_key = openai_api_key
 
-# Secret key for Flask (can be used for sessions, etc.)
+# Secret key for Flask (used for sessions)
 app.secret_key = config.get('secret_key')
+if not app.secret_key:
+    logging.error('Secret key is missing in the configuration file')
+    raise ValueError('Secret key is missing in the configuration file')
 
 # Database connection parameters from config file
 sabre_db_config = config['database']['sabre_db1']
@@ -61,7 +63,7 @@ try:
         dbname=sabre_db_config['dbname'],
         user=sabre_db_config['user'],
         password=sabre_db_config['password'],
-        sslmode = 'disable'
+        sslmode='disable'
     )
     logging.info("sabre_db1 connection pool created successfully")
 
@@ -73,12 +75,92 @@ try:
         dbname=chat_history_db_config['dbname'],
         user=chat_history_db_config['user'],
         password=chat_history_db_config['password'],
-        sslmode = 'disable'
+        sslmode='disable'
     )
     logging.info("chat_history connection pool created successfully")
 except Exception as e:
     logging.error("Error creating database connection pools: %s", e)
     raise
+
+# Login required decorator
+def login_required(f):
+    """Protect routes that require login."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:  # If user is not logged in
+            logging.debug("User not logged in, redirecting to login page")
+            return redirect(url_for('login'))  # Redirect to login page
+        logging.debug("User is logged in")
+        return f(*args, **kwargs)
+    return decorated_function
+
+# User authentication functions
+def get_user_by_username(username):
+    """Retrieve user from the database by username."""
+    try:
+        conn = chat_history_pool.getconn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, password_hash FROM users WHERE username = %s", (username,))
+        user = cursor.fetchone()
+        cursor.close()
+        chat_history_pool.putconn(conn)
+
+        if user:
+            return {'username': user[0], 'password': user[1]}  # Return user info
+        return None
+    except Exception as e:
+        logging.error(f"Error fetching user by username: {e}")
+        return None
+
+def check_password(plain_password, stored_password):
+    """Check if the provided password matches the stored hashed password."""
+    return plain_password == stored_password  # This is a basic check. Ideally, use password hashing (e.g., bcrypt)
+
+# Login route
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Login page for user authentication."""
+    # Clear session when visiting login page
+    session.clear()
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+
+        user = get_user_by_username(username)  # Check if the user exists in the DB
+        if user and check_password(password, user['password']):  # Validate password
+            session['username'] = username  # Store user in session
+            logging.info(f"User {username} logged in")
+            return redirect(url_for('index'))  # Redirect to protected page (home)
+
+        # If login fails, render login page with error message
+        logging.warning("Invalid credentials provided")
+        return render_template('login.html', error="Invalid credentials")
+
+    # Render login page if GET request
+    return render_template('login.html')
+
+# Logout route
+@app.route('/logout')
+def logout():
+    """Log out the user by clearing the session."""
+    session.pop('username', None)  # Remove the user from the session
+    logging.info("User logged out")
+    return redirect(url_for('login'))  # Redirect to the login page
+
+# Home route redirects to login
+@app.route('/')
+def home():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    else:
+        return redirect(url_for('index'))
+
+# Protected index route
+@app.route('/index')
+@login_required
+def index():
+    logging.info("Rendering index page")
+    return render_template("test1.html")
 
 def get_database_schema():
     """Retrieve table and column names from the sabre_db1 PostgreSQL database."""
@@ -127,55 +209,53 @@ def get_serializable_messages(messages):
         serializable_messages.append(serializable_msg)
     return serializable_messages
 
-
-@app.route('/new-chat', methods=['POST'])
-def new_chat():
-    # Generate a unique ID for the chat session
-    chat_id = str(uuid4())
-    conversation_history.append({
-        'id': chat_id,  # Ensure each chat session has a unique ID
-        'messages': [],
-        'awaiting_clarification': False
-    })
-    logging.info("Initialized a new chat session with ID: %s", chat_id)
-    return jsonify({'status': 'New chat session created', 'chat_id': chat_id}), 200
-
-
-
 @app.route('/edit-prompt', methods=['POST'])
+@login_required
 def edit_prompt():
     data = request.get_json()
-    chat_id = data.get('chat_id')  # Use chat_id instead of chat_index
+    chat_index = data.get('chat_index', len(conversation_history) - 1)  # Default to the latest session if out of bounds
     message_index = data.get('message_index')
     new_content = data.get('content')
 
-    if not chat_id or message_index is None or new_content is None:
+    # Early check for required fields
+    if message_index is None or new_content is None:
         logging.warning("Incomplete data provided for editing prompt")
         return jsonify({'error': 'Incomplete data provided'}), 400
 
-    # Find the chat session by chat_id
-    chat_session = next((chat for chat in conversation_history if chat['id'] == chat_id), None)
-    if not chat_session:
-        logging.error("Invalid chat ID provided for editing prompt")
-        return jsonify({'error': 'Invalid chat ID provided'}), 400
+    # Ensure there's at least one chat session in conversation_history
+    if not conversation_history:
+        logging.info("Initializing conversation_history with a new chat session as it is currently empty.")
+        conversation_history.append({'messages': [], 'awaiting_clarification': False})
 
+    # Adjust chat_index to fall within valid range if necessary
+    if chat_index < 0 or chat_index >= len(conversation_history):
+        logging.warning(f"Adjusted invalid chat_index {chat_index} to the latest session.")
+        chat_index = len(conversation_history) - 1
+
+    chat_session = conversation_history[chat_index]
     messages = chat_session['messages']
 
-    # Validate message index
-    if message_index >= len(messages) or message_index < 0:
-        logging.error("Invalid message index provided for editing prompt")
-        return jsonify({'error': 'Invalid message index'}), 400
+    # Validate message_index within bounds
+    if not (0 <= message_index < len(messages)):
+        logging.error(f"Invalid message index provided: {message_index}. Valid range is 0 to {len(messages) - 1}")
+        return jsonify({'error': f'Invalid message index {message_index}. Ensure the message exists in the chat.'}), 400
 
-    # Update the specific message's content in conversation_history
-    messages[message_index]["content"] = new_content
-    logging.info("Successfully updated prompt in conversation history")
+    try:
+        # Update the message content at specified index
+        messages[message_index]["content"] = new_content
+        logging.info("Successfully updated prompt in conversation history")
 
-    # Remove the assistant's response that follows this message, if it exists
-    if message_index + 1 < len(messages) and messages[message_index + 1]["role"] == "assistant":
-        del messages[message_index + 1]
+        # Optionally remove the assistant's response if it follows the user message
+        if message_index + 1 < len(messages) and messages[message_index + 1]["role"] == "assistant":
+            del messages[message_index + 1]
+            logging.info("Removed assistant's response following the updated user prompt")
 
-    # Generate a new response
-    return generate_response_for_edit(chat_id, message_index)
+        # Generate a new response for the updated prompt
+        return generate_response_for_edit(chat_index, message_index)
+
+    except IndexError as e:
+        logging.error("Error updating conversation history: %s", e)
+        return jsonify({'error': 'An unexpected error occurred while editing the prompt'}), 500
 
 def generate_response_for_edit(chat_index, message_index):
     """Generates a response for an edited prompt starting from generate_response workflow."""
@@ -215,18 +295,15 @@ def is_incomplete_prompt(prompt):
     # Additional checks can be added here
     return False
 
-@app.route("/", methods=["GET"])
-def index():
-    logging.info("Rendering index page")
-    return render_template("index.html")
-
 @app.route("/chat-history", methods=["GET"])
+@login_required
 def chat_history_route():
     """Endpoint to fetch the chat history."""
     logging.info("Fetching chat history")
     return jsonify({'history': conversation_history})
 
 @app.route("/submit_query", methods=["POST"])
+@login_required
 def submit_query():
     prompt = request.form.get('prompt')
     if not prompt:
@@ -236,6 +313,7 @@ def submit_query():
     return render_template("about.html", prompt=prompt)
 
 @app.route('/generate-response', methods=['POST'])
+@login_required
 def generate_response():
     data = request.get_json()
     if not data or 'prompt' not in data:
@@ -547,10 +625,6 @@ def get_database_schema_dict():
     """Retrieve the database schema as a dictionary for validation."""
     return get_database_schema()
 
-def format_schema_as_dict(schema):
-    """Ensure the schema is in dictionary format."""
-    return schema  # Assuming get_database_schema() already returns a dict
-
 def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, previous_data=None):
     """Generate SQL query based on user prompt, schema, and conversation history."""
     logging.debug("Generating SQL query based on the prompt")
@@ -558,10 +632,8 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
     # Create the base system message with instructions and schema
     system_prompt = (
         "As a SQL expert, generate a safe, read-only SQL query based on the user's prompt and the provided database schema. "
-        "generate correct syntax of query and only return sql query in response"
+        "Generate correct syntax of query and only return SQL query in response. "
         "Determine what data is needed to answer the prompt. The query should fetch necessary data for analysis. "
-        "Generate query in this way that if some names column are present in that table then they are must extracted. "
-        "If the effective date is greater than the ship date, then orders are late; if the effective date is less than or equal to the ship date, then it's on time. "
         "Ensure the query is syntactically correct and optimized. Do not ask for clarification.\n\n"
         "Database Schema:\n" + schema
     )
@@ -613,8 +685,8 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
 
     # Create the base system message with instructions and schema
     system_prompt = (
-        "As a SQL expert, you have attempted to execute the following SQL query but encountered an error."
-        "Your task is to correct the SQL query based on the error message provided. Do not ask for clarification."
+        "As a SQL expert, you have attempted to execute the following SQL query but encountered an error. "
+        "Your task is to correct the SQL query based on the error message provided. Do not ask for clarification. "
         "Provide only the corrected SQL query.\n\n"
         "Original SQL Query:\n" + original_query +
         "\n\nError Message:\n" + error_message +
@@ -907,5 +979,5 @@ def ensure_semicolon(sql_query):
         return sql_query + ';' if not sql_query.endswith(';') else sql_query
     return sql_query
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     app.run(debug=True)
