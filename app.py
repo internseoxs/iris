@@ -60,7 +60,7 @@ try:
         port=sabre_db_config['port'],
         dbname=sabre_db_config['dbname'],
         user=sabre_db_config['user'],
-        password=sabre_db_config['password']
+        password=sabre_db_config['password'],
         sslmode = 'require'
     )
     logging.info("sabre_db1 connection pool created successfully")
@@ -72,7 +72,7 @@ try:
         port=chat_history_db_config['port'],
         dbname=chat_history_db_config['dbname'],
         user=chat_history_db_config['user'],
-        password=chat_history_db_config['password']
+        password=chat_history_db_config['password'],
         sslmode = 'require'
     )
     logging.info("chat_history connection pool created successfully")
