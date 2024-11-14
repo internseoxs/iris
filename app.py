@@ -10,8 +10,9 @@ from datetime import datetime, date
 import logging
 import os
 import uuid  # For generating unique chat IDs
+from uuid import uuid4
 
-app = Flask(__name__)  # Fixed Flask app initialization
+app = Flask(_name_)  # Fixed Flask app initialization
 
 # Initialize conversation history
 conversation_history = []
@@ -23,10 +24,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 with open('config.json', 'r') as config_file:
     config = json.load(config_file)
 
-openai_api_key = os.getenv('OPENAI_API_KEY')
+# Set OpenAI API key from config file
+openai_api_key = config.get('openai_api_key')
 if not openai_api_key:
-    logging.error('OpenAI API key is missing in the environment variables')
-    raise ValueError('OpenAI API key is missing in the environment variables')
+    logging.error('OpenAI API key is missing in the configuration file')
+    raise ValueError('OpenAI API key is missing in the configuration file')
 openai.api_key = openai_api_key
 
 # Secret key for Flask (can be used for sessions, etc.)
@@ -57,8 +59,7 @@ try:
         port=sabre_db_config['port'],
         dbname=sabre_db_config['dbname'],
         user=sabre_db_config['user'],
-        password=sabre_db_config['password'],
-        sslmode='disable'  # Disable SSL encryption
+        password=sabre_db_config['password']
     )
     logging.info("sabre_db1 connection pool created successfully")
 
@@ -69,8 +70,7 @@ try:
         port=chat_history_db_config['port'],
         dbname=chat_history_db_config['dbname'],
         user=chat_history_db_config['user'],
-        password=chat_history_db_config['password'],
-        sslmode='disable'  # Disable SSL encryption
+        password=chat_history_db_config['password']
     )
     logging.info("chat_history connection pool created successfully")
 except Exception as e:
@@ -124,53 +124,55 @@ def get_serializable_messages(messages):
         serializable_messages.append(serializable_msg)
     return serializable_messages
 
+
+@app.route('/new-chat', methods=['POST'])
+def new_chat():
+    # Generate a unique ID for the chat session
+    chat_id = str(uuid4())
+    conversation_history.append({
+        'id': chat_id,  # Ensure each chat session has a unique ID
+        'messages': [],
+        'awaiting_clarification': False
+    })
+    logging.info("Initialized a new chat session with ID: %s", chat_id)
+    return jsonify({'status': 'New chat session created', 'chat_id': chat_id}), 200
+
+
+
 @app.route('/edit-prompt', methods=['POST'])
 def edit_prompt():
     data = request.get_json()
-    chat_index = data.get('chat_index', len(conversation_history) - 1)  # Default to the latest session if out of bounds
+    chat_id = data.get('chat_id')  # Use chat_id instead of chat_index
     message_index = data.get('message_index')
     new_content = data.get('content')
 
-    # Early check for required fields
-    if message_index is None or new_content is None:
+    if not chat_id or message_index is None or new_content is None:
         logging.warning("Incomplete data provided for editing prompt")
         return jsonify({'error': 'Incomplete data provided'}), 400
 
-    # Ensure there's at least one chat session in conversation_history
-    if not conversation_history:
-        logging.info("Initializing conversation_history with a new chat session as it is currently empty.")
-        conversation_history.append({'messages': [], 'awaiting_clarification': False})
+    # Find the chat session by chat_id
+    chat_session = next((chat for chat in conversation_history if chat['id'] == chat_id), None)
+    if not chat_session:
+        logging.error("Invalid chat ID provided for editing prompt")
+        return jsonify({'error': 'Invalid chat ID provided'}), 400
 
-    # Adjust chat_index to fall within valid range if necessary
-    if chat_index < 0 or chat_index >= len(conversation_history):
-        logging.warning(f"Adjusted invalid chat_index {chat_index} to the latest session.")
-        chat_index = len(conversation_history) - 1
-
-    chat_session = conversation_history[chat_index]
     messages = chat_session['messages']
 
-    # Validate message_index within bounds
-    if not (0 <= message_index < len(messages)):
-        logging.error(f"Invalid message index provided: {message_index}. Valid range is 0 to {len(messages) - 1}")
-        return jsonify({'error': f'Invalid message index {message_index}. Ensure the message exists in the chat.'}), 400
+    # Validate message index
+    if message_index >= len(messages) or message_index < 0:
+        logging.error("Invalid message index provided for editing prompt")
+        return jsonify({'error': 'Invalid message index'}), 400
 
-    try:
-        # Update the message content at specified index
-        messages[message_index]["content"] = new_content
-        logging.info("Successfully updated prompt in conversation history")
+    # Update the specific message's content in conversation_history
+    messages[message_index]["content"] = new_content
+    logging.info("Successfully updated prompt in conversation history")
 
-        # Optionally remove the assistant's response if it follows the user message
-        if message_index + 1 < len(messages) and messages[message_index + 1]["role"] == "assistant":
-            del messages[message_index + 1]
-            logging.info("Removed assistant's response following the updated user prompt")
+    # Remove the assistant's response that follows this message, if it exists
+    if message_index + 1 < len(messages) and messages[message_index + 1]["role"] == "assistant":
+        del messages[message_index + 1]
 
-        # Generate a new response for the updated prompt
-        return generate_response_for_edit(chat_index, message_index)
-
-    except IndexError as e:
-        logging.error("Error updating conversation history: %s", e)
-        return jsonify({'error': 'An unexpected error occurred while editing the prompt'}), 500
-
+    # Generate a new response
+    return generate_response_for_edit(chat_id, message_index)
 
 def generate_response_for_edit(chat_index, message_index):
     """Generates a response for an edited prompt starting from generate_response workflow."""
@@ -213,7 +215,7 @@ def is_incomplete_prompt(prompt):
 @app.route("/", methods=["GET"])
 def index():
     logging.info("Rendering index page")
-    return render_template("index.html")
+    return render_template("index3.html")
 
 @app.route("/chat-history", methods=["GET"])
 def chat_history_route():
@@ -902,5 +904,5 @@ def ensure_semicolon(sql_query):
         return sql_query + ';' if not sql_query.endswith(';') else sql_query
     return sql_query
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     app.run(debug=True)
