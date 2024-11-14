@@ -12,7 +12,7 @@ import os
 import uuid  # For generating unique chat IDs
 from uuid import uuid4
 
-app = Flask(_name_)  # Fixed Flask app initialization
+app = Flask(__name__)  # Fixed Flask app initialization
 
 # Initialize conversation history
 conversation_history = []
@@ -25,7 +25,7 @@ with open('config.json', 'r') as config_file:
     config = json.load(config_file)
 
 # Set OpenAI API key from config file
-openai_api_key = config.get('openai_api_key')
+openai_api_key = os.getenv('OPENAI_API_KEY')
 if not openai_api_key:
     logging.error('OpenAI API key is missing in the configuration file')
     raise ValueError('OpenAI API key is missing in the configuration file')
@@ -904,5 +904,5 @@ def ensure_semicolon(sql_query):
         return sql_query + ';' if not sql_query.endswith(';') else sql_query
     return sql_query
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(debug=True)
