@@ -407,7 +407,7 @@ def clarify_prompt(prompt, messages):
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[system_message] + recent_messages,
-            max_tokens=50,
+            max_tokens=500,
             temperature=0.0,
             n=1,
         )
@@ -663,7 +663,7 @@ def generate_sql_query(prompt, schema, messages=None, previous_sql_query=None, p
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=500,
+            max_tokens=5000,
             temperature=0.0,
             n=1,
         )
@@ -712,7 +712,7 @@ def correct_sql_query(original_query, error_message, schema, messages=None, prev
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=500,
+            max_tokens=5000,
             temperature=0.0,
             n=1,
         )
@@ -814,7 +814,7 @@ def generate_final_response(prompt, db_data, messages=None):
             response = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 messages=temp_messages,
-                max_tokens=8000,
+                max_tokens=80000,
                 temperature=0.0,
                 n=1,
             )
@@ -917,7 +917,7 @@ def requires_more_data(prompt, messages=None):
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=5,  # Reduced to get concise 'yes' or 'no'
+            max_tokens=50,  # Reduced to get concise 'yes' or 'no'
             temperature=0.0,
             n=1,
         )
@@ -958,7 +958,7 @@ def is_related_to_previous_prompt(new_prompt, previous_prompts):
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=messages_to_use,
-            max_tokens=5,  # Reduced to get concise 'yes' or 'no'
+            max_tokens=50,  # Reduced to get concise 'yes' or 'no'
             temperature=0.0,
             n=1,
         )
