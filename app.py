@@ -215,7 +215,7 @@ def is_incomplete_prompt(prompt):
 @app.route("/", methods=["GET"])
 def index():
     logging.info("Rendering index page")
-    return render_template("index3.html")
+    return render_template("index.html")
 
 @app.route("/chat-history", methods=["GET"])
 def chat_history_route():
