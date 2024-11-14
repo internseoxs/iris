@@ -944,7 +944,7 @@ def is_related_to_previous_prompt(new_prompt, previous_prompts):
             "role": "system",
             "content": (
                 "As an AI assistant, determine if the user's new prompt is related to the previous conversation. "
-                "Respond with 'yes' if the new prompt is related or 'no' if it is not related. "
+                "Respond with 'yes' if the new prompt is related or 'no' if it is not related.,take previous chats and give answer "
                 "Only respond with 'yes' or 'no'."
             )
         },
