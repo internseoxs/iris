@@ -61,7 +61,7 @@ try:
         dbname=sabre_db_config['dbname'],
         user=sabre_db_config['user'],
         password=sabre_db_config['password'],
-        sslmode = 'false'
+        sslmode = 'disable'
     )
     logging.info("sabre_db1 connection pool created successfully")
 
@@ -73,7 +73,7 @@ try:
         dbname=chat_history_db_config['dbname'],
         user=chat_history_db_config['user'],
         password=chat_history_db_config['password'],
-        sslmode = 'false'
+        sslmode = 'disable'
     )
     logging.info("chat_history connection pool created successfully")
 except Exception as e:
