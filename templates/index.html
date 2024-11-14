@@ -466,16 +466,26 @@ h2 {
         }
 
         function editPrompt(chatIndex, messageIndex) {
-            const prompt = chatHistory[chatIndex].messages[messageIndex].content;
-            document.getElementById('prompt').value = prompt; // Load message content into the input field
-            document.getElementById('sendButton').style.display = 'none'; // Hide send button
-            document.getElementById('saveEditButton').style.display = 'inline'; // Show save edit button
-            document.getElementById('cancelEditButton').style.display = 'inline';
+    const chatSession = chatHistory[chatIndex];
+    
+    // Ensure the chat session and message exist
+    if (!chatSession || !chatSession.messages[messageIndex]) {
+        console.error("Invalid chat or message index for editing.");
+        alert("Cannot edit this message as it does not exist.");
+        return;  // Exit the function if the indices are invalid
+    }
 
-            // Store the indices for reference during save
-            window.currentEditChatIndex = chatIndex;
-            window.currentEditMessageIndex = messageIndex;
-        }
+    const prompt = chatSession.messages[messageIndex].content;
+    document.getElementById('prompt').value = prompt; // Load message content into the input field
+    document.getElementById('sendButton').style.display = 'none'; // Hide send button
+    document.getElementById('saveEditButton').style.display = 'inline'; // Show save edit button
+    document.getElementById('cancelEditButton').style.display = 'inline';
+
+    // Store the chat_id and indices for reference during save
+    window.currentEditChatId = chatSession.chat_id;
+    window.currentEditMessageIndex = messageIndex;
+}
+
 
         function showLoadingMessage() {
             const chatContainer = document.getElementById('chat-container');
@@ -501,58 +511,64 @@ h2 {
         }
 
         function saveEditedPrompt() {
-            const newPrompt = document.getElementById('prompt').value.trim();
+    const newPrompt = document.getElementById('prompt').value.trim();
 
-            if (!newPrompt) return;
+    if (!newPrompt) return;
 
-            // Show loading message
-            showLoadingMessage();
+    // Validate chat_id and message index
+    if (!window.currentEditChatId || window.currentEditMessageIndex == null) {
+        console.error("Invalid chat ID or message index for saving edited prompt.");
+        return;  // Exit if the indices are invalid
+    }
 
-            // Clear input
+    // Show loading message
+    showLoadingMessage();
+
+    // Clear input
+    document.getElementById('prompt').value = '';
+
+    // Call the backend to save the updated prompt using chat_id
+    fetch('/edit-prompt', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            chat_id: window.currentEditChatId,
+            message_index: window.currentEditMessageIndex,
+            content: newPrompt
+        }),
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Hide loading message
+        hideLoadingMessage();
+
+        if (!data.error) {
+            // Update the local chat history and re-render
+            let chatSession = chatHistory.find(chat => chat.chat_id === window.currentEditChatId);
+            chatSession.messages[window.currentEditMessageIndex].content = newPrompt;
+            if (chatSession.messages[window.currentEditMessageIndex + 1]?.role === 'assistant') {
+                chatSession.messages.splice(window.currentEditMessageIndex + 1, 1);
+            }
+            chatSession.messages.push({ role: 'assistant', content: data.response });
+            renderChatHistory();
             document.getElementById('prompt').value = '';
-
-            // Call the backend to save the updated prompt
-            fetch('/edit-prompt', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    chat_index: window.currentEditChatIndex,
-                    message_index: window.currentEditMessageIndex,
-                    content: newPrompt
-                }),
-            })
-            .then(response => response.json())
-            .then(data => {
-                // Hide loading message
-                hideLoadingMessage();
-
-                if (!data.error) {
-                    // Update the local chat history and re-render
-                    let messages = chatHistory[window.currentEditChatIndex].messages;
-                    messages[window.currentEditMessageIndex].content = newPrompt;
-                    // Remove old assistant response
-                    if (messages[window.currentEditMessageIndex + 1] && messages[window.currentEditMessageIndex + 1].role === 'assistant') {
-                        messages.splice(window.currentEditMessageIndex + 1, 1);
-                    }
-                    // Append new assistant response
-                    messages.push({ role: 'assistant', content: data.response });
-                    renderChatHistory();
-                    document.getElementById('prompt').value = '';
-                    document.getElementById('saveEditButton').style.display = 'none';
-                    document.getElementById('cancelEditButton').style.display = 'none';
-                    document.getElementById('sendButton').style.display = 'inline'; // Show send button again
-                } else {
-                    console.error('Failed to update prompt:', data.error);
-                }
-            })
-            .catch(error => {
-                console.error('Error updating prompt:', error);
-                // Hide loading message
-                hideLoadingMessage();
-            });
+            document.getElementById('saveEditButton').style.display = 'none';
+            document.getElementById('cancelEditButton').style.display = 'none';
+            document.getElementById('sendButton').style.display = 'inline';
+        } else {
+            console.error('Failed to update prompt:', data.error);
         }
+    })
+    .catch(error => {
+        console.error('Error updating prompt:', error);
+        hideLoadingMessage();
+    });
+}
+
+            
+             
 
         function cancelEdit() {
             document.getElementById('prompt').value = ''; // Clear input
@@ -624,12 +640,35 @@ h2 {
         }
 
         function newChat() {
-            currentChatIndex = chatHistory.length;
-            chatHistory.push({ messages: [] });
-            document.getElementById('chat-container').innerHTML = '';
-            renderChatList();
-            renderChatHistory();
+    // Add a new chat session in the frontend
+    currentChatIndex = chatHistory.length;
+    chatHistory.push({ messages: [], chat_id: null });
+    document.getElementById('chat-container').innerHTML = '';
+    renderChatList();
+    renderChatHistory();
+
+    // Send a request to the backend to initialize a new chat session
+    fetch('/new-chat', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            console.error('Error initializing new chat session:', data.error);
+        } else {
+            // Store the backend chat_id in the frontend chat session
+            chatHistory[currentChatIndex].chat_id = data.chat_id;
         }
+    })
+    .catch(error => {
+        console.error('Error initializing new chat session:', error);
+    });
+}
+
+        
 
         function toggleTheme() {
             const body = document.body;
