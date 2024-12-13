@@ -3,7 +3,7 @@
   "database": {
     "sabre_db1": {
       "host": "185.252.232.26",
-      "dbname": "sabrealloys_staging",
+      "dbname": "sabre_stg",
       "user": "odoo",
       "password": "goatpac123@15",
       "port": 5432
