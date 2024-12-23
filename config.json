@@ -6,11 +6,11 @@
       "dbname": "Sabre_Database",
       "user": "harsh",
       "password": "harshverma820",
-      "port": 16811
+      "port": 18059
     },
     "chat_history": {
       "host": "0.tcp.in.ngrok.io",
-      "port": 16811,
+      "port": 18059,
       "dbname": "chat_history1",
       "user": "harsh",
       "password": "harshverma820"
