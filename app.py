@@ -63,8 +63,13 @@ try:
         dbname=sabre_db_config['dbname'],
         user=sabre_db_config['user'],
         password=sabre_db_config['password'],
-        sslmode='disable'
-    )
+        sslmode='disable',
+        keepalives=1,
+        keepalives_idle=30,      # # of seconds of inactivity before keepalive probe
+        keepalives_interval=10,  # Interval in seconds between keepalive probes
+        keepalives_count=5       # # of failed probes before dropping the connection
+)
+    
     logging.info("sabre_db1 connection pool created successfully")
 
     chat_history_pool = psycopg2.pool.SimpleConnectionPool(
@@ -75,8 +80,13 @@ try:
         dbname=chat_history_db_config['dbname'],
         user=chat_history_db_config['user'],
         password=chat_history_db_config['password'],
-        sslmode='disable'
-    )
+        sslmode='disable',
+        keepalives=1,
+        keepalives_idle=30,      # # of seconds of inactivity before keepalive probe
+        keepalives_interval=10,  # Interval in seconds between keepalive probes
+        keepalives_count=5       # # of failed probes before dropping the connection
+)
+    
     logging.info("chat_history connection pool created successfully")
 except Exception as e:
     logging.error("Error creating database connection pools: %s", e)
