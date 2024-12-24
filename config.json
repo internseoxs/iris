@@ -5,15 +5,15 @@
       "host": "185.252.232.26",
       "dbname": "sabre_stg",
       "user": "odoo",
-      "password": "goatpac123@15",
+      "password": "stg123",
       "port": 5432
     },
     "chat_history": {
       "host": "185.252.232.26",
       "port": 5432,
-      "dbname": "chat_history",
+      "dbname": "chat_history2",
       "user": "odoo",
-      "password": "goatpac123@15"
+      "password": "stg123"
     }
   }
 }
