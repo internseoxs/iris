@@ -2,18 +2,18 @@
    "secret_key": "your_random_secret_key_here",
   "database": {
     "sabre_db1": {
-      "host": "0.tcp.in.ngrok.io",
-      "dbname": "sabre_database2",
-      "user": "harsh",
-      "password": "harshverma820",
-      "port": 12998
+      "host": "185.252.232.26",
+      "dbname": "sabrealloys_staging",
+      "user": "odoo",
+      "password": "goatpac123@15",
+      "port": 5432
     },
     "chat_history": {
-      "host": "0.tcp.in.ngrok.io",
-      "port": 12998,
-      "dbname": "chat_history1",
-      "user": "harsh",
-      "password": "harshverma820"
+      "host": "185.252.232.26",
+      "port": 5432,
+      "dbname": "chat_history",
+      "user": "odoo",
+      "password": "goatpac123@15"
     }
   }
 }
