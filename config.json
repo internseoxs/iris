@@ -3,7 +3,7 @@
   "database": {
     "sabre_db1": {
       "host": "0.tcp.in.ngrok.io",
-      "dbname": "Sabre_Database",
+      "dbname": "sabre_database2",
       "user": "harsh",
       "password": "harshverma820",
       "port": 12998
